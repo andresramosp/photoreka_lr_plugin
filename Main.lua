@@ -14,9 +14,11 @@ local log = LrLogger('PhotorekaPlugin')
 log:enable("logfile")
 
 -- Servicios personalizados
+local Config = require 'Config'
 local ExportService = require 'ExportService'
 local ApiService = require 'ApiService'
 local ExifService = require 'ExifService'
+local AuthService = require 'AuthService'
 
 log:info("========================================")
 log:info("MAIN.LUA EJECUTÁNDOSE")
@@ -88,13 +90,31 @@ LrFunctionContext.callWithContext('showDialog', function(context)
         end
     end
     
+    -- Obtener información del usuario autenticado (si existe)
+    local userInfo = AuthService.getStoredUserInfo()
+    local accountButtonTitle = userInfo and string.format('👤 %s', userInfo.name or userInfo.email) or '👤 Cuenta'
+    
     -- Crear el contenido del diálogo
     local dialogContent = f:column {
         spacing = f:control_spacing(),
         
-        f:static_text {
-            title = string.format('Fotos seleccionadas: %d', #photos),
-            font = '<system/bold>',
+        -- Header con título y botón de cuenta
+        f:row {
+            fill_horizontal = 1,
+            
+            f:static_text {
+                title = string.format('Fotos seleccionadas: %d', #photos),
+                font = '<system/bold>',
+            },
+            
+            f:spacer { fill_horizontal = 1 },
+            
+            f:push_button {
+                title = accountButtonTitle,
+                action = function()
+                    AuthService.showAccountDialog()
+                end,
+            },
         },
         
         f:separator { fill_horizontal = 1 },
@@ -170,7 +190,7 @@ LrFunctionContext.callWithContext('showDialog', function(context)
                     table.insert(sourceDataList, sourceData)
                     
                     local exifData
-                    if ApiService.USE_MOCK_EXIF then
+                    if Config.USE_MOCK_EXIF then
                         -- Usar EXIF inventados para pruebas
                         exifData = ExifService.getMockExifData()
                     else

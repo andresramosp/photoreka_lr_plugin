@@ -7,6 +7,8 @@ local LrDialogs = import 'LrDialogs'
 local LrLogger = import 'LrLogger'
 
 local JSON = require 'JSON'
+local Config = require 'Config'
+local AuthService = require 'AuthService'
 
 local ApiService = {}
 
@@ -14,26 +16,18 @@ local ApiService = {}
 local log = LrLogger('PhotorekaPlugin')
 log:enable("logfile")
 
--- ========================================
--- CONFIGURACIÓN - EDITAR ESTAS VARIABLES
--- ========================================
-ApiService.API_BASE_URL = 'http://localhost:3333'
-ApiService.ANALYZER_API_BASE_URL = 'http://localhost:3333'
-ApiService.AUTH_TOKEN = 'oat_NDQ.MG5INjlLNldpMExiLVRITGE4TG9kUXZvd1ZpM0t6ZUxvYThtNUtKdzE5MDMyOTE4MTY'  -- SETEAR TOKEN AQUÍ PARA PRUEBAS (sin "Bearer ")
-ApiService.USE_MOCK_EXIF = true  -- true = usar EXIF inventados, false = extraer EXIF reales
--- ========================================
+log:info("ApiService cargado. API_BASE_URL: " .. Config.API_BASE_URL)
 
--- Configuración de comportamiento
-ApiService.MAX_RETRIES = 3  -- Reintentos por subida
-ApiService.CONCURRENT_UPLOADS = 5  -- Número de subidas simultáneas (similar a p-limit)
-
-log:info("ApiService cargado. API_BASE_URL: " .. ApiService.API_BASE_URL)
-
--- Valida que el token esté configurado
-local function validateToken()
-    if not ApiService.AUTH_TOKEN or ApiService.AUTH_TOKEN == '' then
-        error("AUTH_TOKEN no está configurado. Por favor, edita ApiService.lua y setea ApiService.AUTH_TOKEN")
+-- Obtiene el token de autenticación (desde AuthService)
+-- Retorna: token string o genera error si no se puede autenticar
+local function getAuthToken()
+    local token = AuthService.ensureAuthenticated()
+    
+    if not token or token == '' then
+        error("No se pudo obtener el token de autenticación. El usuario canceló el login.")
     end
+    
+    return token
 end
 
 -- Lee un archivo como datos binarios
@@ -66,7 +60,7 @@ end
 --   maxRetries: número máximo de reintentos
 -- Retorna: true si éxito, error si falla
 local function uploadToR2WithRetry(url, filePath, fileType, maxRetries)
-    maxRetries = maxRetries or ApiService.MAX_RETRIES
+    maxRetries = maxRetries or Config.MAX_RETRIES
     
     -- Leer el archivo una sola vez
     log:info("Leyendo archivo: " .. tostring(filePath))
@@ -120,9 +114,9 @@ end
 --   sourceData: tabla con información de origen {type, uniqueId}
 -- Retorna: tabla con {uploadUrl, thumbnailUploadUrl, photo}
 local function requestUploadUrls(originalName, exifData, sourceData)
-    validateToken()
+    local token = getAuthToken()
     
-    local url = ApiService.API_BASE_URL .. "/api/catalog/uploadPhoto"
+    local url = Config.API_BASE_URL .. "/api/catalog/uploadPhoto"
     
     local payload = {
         fileType = "image/jpeg",
@@ -134,7 +128,7 @@ local function requestUploadUrls(originalName, exifData, sourceData)
     log:info("Preparando request a: " .. url)
     
     local headers = {
-        { field = "Authorization", value = "Bearer " .. ApiService.AUTH_TOKEN },
+        { field = "Authorization", value = "Bearer " .. token },
         { field = "Content-Type", value = "application/json" }
     }
     
@@ -203,7 +197,7 @@ local function processAndUploadPhoto(mainImagePath, thumbnailPath, exifData, sou
         uploadData.uploadUrl,
         mainImagePath,
         "image/jpeg",
-        ApiService.MAX_RETRIES
+        Config.MAX_RETRIES
     )
     
     log:info("Imagen principal subida OK")
@@ -214,7 +208,7 @@ local function processAndUploadPhoto(mainImagePath, thumbnailPath, exifData, sou
         uploadData.thumbnailUploadUrl,
         thumbnailPath,
         "image/jpeg",
-        ApiService.MAX_RETRIES
+        Config.MAX_RETRIES
     )
     
     log:info("Thumbnail subido OK")
@@ -228,9 +222,9 @@ end
 -- Parámetros:
 --   photoIds: array de IDs de fotos subidas exitosamente
 local function triggerProcess(photoIds)
-    validateToken()
+    local token = getAuthToken()
     
-    local url = ApiService.ANALYZER_API_BASE_URL .. "/api/analyzer"
+    local url = Config.ANALYZER_API_BASE_URL .. "/api/analyzer"
     
     local payload = {
         packageId = "process",
@@ -239,7 +233,7 @@ local function triggerProcess(photoIds)
     }
     
     local headers = {
-        { field = "Authorization", value = "Bearer " .. ApiService.AUTH_TOKEN },
+        { field = "Authorization", value = "Bearer " .. token },
         { field = "Content-Type", value = "application/json" }
     }
     
@@ -353,7 +347,7 @@ function ApiService.uploadPhotos(photoData, progressCallback)
     log:info("Full photos: " .. tostring(#fullPhotos))
     log:info("Thumb photos: " .. tostring(#thumbPhotos))
     log:info("EXIF data: " .. tostring(#exifDataList))
-    log:info("Concurrent uploads: " .. tostring(ApiService.CONCURRENT_UPLOADS))
+    log:info("Concurrent uploads: " .. tostring(Config.CONCURRENT_UPLOADS))
     log:info("========================================")
     
     -- Validar que los arrays tengan la misma longitud
@@ -401,7 +395,7 @@ function ApiService.uploadPhotos(photoData, progressCallback)
     -- Procesar fotos con límite de concurrencia
     local results = processWithConcurrencyLimit(
         tasks,
-        ApiService.CONCURRENT_UPLOADS,
+        Config.CONCURRENT_UPLOADS,
         progressCallback,
         totalPhotos
     )
