@@ -91,7 +91,7 @@ LrFunctionContext.callWithContext('showDialog', function(context)
         f:separator { fill_horizontal = 1 },
         
         f:static_text {
-            title = 'Las fotos se exportarán como JPEG con máximo 1500px de lado.',
+            title = 'Las fotos se exportarán en dos versiones: Full (1500px) y Thumbnail (800px).',
             font = '<system/small>',
         },
     }
@@ -106,9 +106,8 @@ LrFunctionContext.callWithContext('showDialog', function(context)
     
     -- Si el usuario hace clic en "Procesar"
     if result == 'ok' then
-        -- Crear carpeta temporal y configurar exportación
+        -- Crear carpeta temporal
         local exportFolder = ExportService.createTempFolder()
-        local exportSettings = ExportService.getExportSettings(exportFolder)
         
         -- Ejecutar exportación y envío en async task
         LrTasks.startAsyncTask(function()
@@ -120,11 +119,11 @@ LrFunctionContext.callWithContext('showDialog', function(context)
                 })
                 
                 -- FASE 1: Exportación (50% del progreso total)
-                progressScope:setCaption('Fase 1/2: Exportando fotos...')
+                progressScope:setCaption('Fase 1/2: Exportando fotos (full + thumbs)...')
                 
-                local exportedFiles = ExportService.exportPhotos(
+                local exportedData = ExportService.exportPhotos(
                     photos,
-                    exportSettings,
+                    exportFolder,
                     function(current, total, caption)
                         -- 0-50% del progreso total
                         local progress = (current / total) * 0.5
@@ -137,7 +136,7 @@ LrFunctionContext.callWithContext('showDialog', function(context)
                 progressScope:setCaption('Fase 2/2: Enviando fotos a Photoreka...')
                 
                 ApiService.uploadPhotos(
-                    exportedFiles,
+                    exportedData,
                     function(current, total, caption)
                         -- 50-100% del progreso total
                         local progress = 0.5 + (current / total) * 0.5
@@ -160,7 +159,7 @@ LrFunctionContext.callWithContext('showDialog', function(context)
                     f:separator { fill_horizontal = 1 },
                     
                     f:static_text {
-                        title = string.format('%d fotos exportadas y enviadas correctamente.', #exportedFiles),
+                        title = string.format('%d fotos exportadas (full + thumbs) y enviadas correctamente.', #exportedData.fullPhotos),
                     },
                     
                     f:spacer { height = 10 },
