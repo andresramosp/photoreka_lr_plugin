@@ -1,11 +1,20 @@
--- Archivo de inicialización del plugin Hola Mundo
--- Actualmente no es necesario hacer nada al iniciar
--- Lightroom cargará este archivo por la clave LrInitPlugin
+-- Archivo de inicialización del plugin Photoreka
+-- Configuración de logging global
 
+local LrLogger = import 'LrLogger'
 local LrTasks = import 'LrTasks'
 
--- Si quisieras ejecutar algo al cargar el plugin, podrías usar:
--- LrTasks.startAsyncTask(function()
---     -- código de inicialización
--- end)
+-- Configurar logger global del plugin
+local log = LrLogger('PhotorekaPlugin')
+log:enable("logfile")
+log:info("========================================")
+log:info("PHOTOREKA PLUGIN INICIADO")
+log:info("========================================")
+log:info("Logger configurado correctamente")
+log:info("========================================")
+
+-- Nota: El log se guarda automáticamente en:
+-- Windows: C:\Users\[usuario]\AppData\Roaming\Adobe\Lightroom\Logs\PhotorekaPlugin.log
+-- macOS: ~/Library/Logs/Adobe/Lightroom/PhotorekaPlugin.log
+
 

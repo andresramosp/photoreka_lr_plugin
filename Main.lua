@@ -6,10 +6,29 @@ local LrView = import 'LrView'
 local LrBinding = import 'LrBinding'
 local LrFunctionContext = import 'LrFunctionContext'
 local LrHttp = import 'LrHttp'
+local LrPathUtils = import 'LrPathUtils'
+local LrLogger = import 'LrLogger'
+
+-- Configurar logger
+local log = LrLogger('PhotorekaPlugin')
+log:enable("logfile")
 
 -- Servicios personalizados
 local ExportService = require 'ExportService'
 local ApiService = require 'ApiService'
+local ExifService = require 'ExifService'
+
+log:info("========================================")
+log:info("MAIN.LUA EJECUTÁNDOSE")
+log:info("========================================")
+
+-- Función auxiliar para obtener nombre de archivo
+local function getFileName(filePath)
+    if filePath then
+        return LrPathUtils.leafName(filePath)
+    end
+    return nil
+end
 
 -- Ejecutar en un async task para permitir diálogos
 LrFunctionContext.callWithContext('showDialog', function(context)
@@ -90,10 +109,7 @@ LrFunctionContext.callWithContext('showDialog', function(context)
         
         f:separator { fill_horizontal = 1 },
         
-        f:static_text {
-            title = 'Las fotos se exportarán en dos versiones: Full (1500px) y Thumbnail (800px).',
-            font = '<system/small>',
-        },
+
     }
     
     -- Mostrar el diálogo con botón "Procesar"
@@ -118,78 +134,168 @@ LrFunctionContext.callWithContext('showDialog', function(context)
                     functionContext = exportContext,
                 })
                 
-                -- FASE 1: Exportación (50% del progreso total)
-                progressScope:setCaption('Fase 1/2: Exportando fotos (full + thumbs)...')
+                -- FASE 1: Exportación (40% del progreso total)
+                progressScope:setCaption('Fase 1/3: Exportando fotos (full + thumbs)...')
                 
                 local exportedData = ExportService.exportPhotos(
                     photos,
                     exportFolder,
                     function(current, total, caption)
-                        -- 0-50% del progreso total
-                        local progress = (current / total) * 0.5
+                        -- 0-40% del progreso total
+                        local progress = (current / total) * 0.4
                         progressScope:setPortionComplete(progress, 1)
-                        progressScope:setCaption('Fase 1/2: ' .. caption)
+                        progressScope:setCaption('Fase 1/3: ' .. caption)
                     end
                 )
                 
-                -- FASE 2: Envío por lotes a la API (50% restante)
-                progressScope:setCaption('Fase 2/2: Enviando fotos a Photoreka...')
+                -- FASE 2: Extracción de EXIF (10% del progreso total)
+                progressScope:setCaption('Fase 2/3: Extrayendo metadatos EXIF...')
                 
-                ApiService.uploadPhotos(
+                local exifDataList = {}
+                local sourceDataList = {}
+                for i, photo in ipairs(photos) do
+                    local progress = 0.4 + (i / #photos) * 0.1
+                    progressScope:setPortionComplete(progress, 1)
+                    
+                    -- Extraer uniqueId de Lightroom
+                    local uniqueId
+                    catalog:withReadAccessDo(function()
+                        uniqueId = photo.localIdentifier or photo:getRawMetadata('uuid')
+                    end)
+                    
+                    local sourceData = {
+                        type = "lightroom",
+                        uniqueId = uniqueId
+                    }
+                    table.insert(sourceDataList, sourceData)
+                    
+                    local exifData
+                    if ApiService.USE_MOCK_EXIF then
+                        -- Usar EXIF inventados para pruebas
+                        exifData = ExifService.getMockExifData()
+                    else
+                        -- Extraer EXIF reales
+                        catalog:withReadAccessDo(function()
+                            exifData = ExifService.extractExifData(photo)
+                        end)
+                    end
+                    table.insert(exifDataList, exifData)
+                end
+                
+                -- FASE 3: Envío a la API (50% restante)
+                progressScope:setCaption('Fase 3/3: Enviando fotos a Photoreka...')
+                
+                exportedData.exifDataList = exifDataList
+                exportedData.sourceDataList = sourceDataList
+                
+                local uploadResult = ApiService.uploadPhotos(
                     exportedData,
                     function(current, total, caption)
                         -- 50-100% del progreso total
                         local progress = 0.5 + (current / total) * 0.5
                         progressScope:setPortionComplete(progress, 1)
-                        progressScope:setCaption('Fase 2/2: ' .. caption)
+                        progressScope:setCaption('Fase 3/3: ' .. caption)
                     end
                 )
                 
                 progressScope:done()
                 
-                -- Mostrar resultado final con enlace
-                local dialogResult = f:column {
+                -- Preparar mensaje de resultado
+                local successCount = #uploadResult.successfulUploads
+                local failureCount = #uploadResult.failedUploads
+                local totalCount = successCount + failureCount
+                
+                local statusText
+                local statusFont
+                if failureCount == 0 then
+                    statusText = '✓ Process completed successfully'
+                    statusFont = '<system/bold>'
+                elseif successCount == 0 then
+                    statusText = '✗ Error: No photos could be uploaded'
+                    statusFont = '<system/bold>'
+                else
+                    statusText = '⚠ Process completed with errors'
+                    statusFont = '<system/bold>'
+                end
+                
+                -- Construir diálogo de resultado
+                local dialogComponents = {
                     spacing = f:control_spacing(),
                     
                     f:static_text {
-                        title = '✓ Proceso completado con éxito',
-                        font = '<system/bold>',
+                        title = statusText,
+                        font = statusFont,
                     },
                     
                     f:separator { fill_horizontal = 1 },
                     
                     f:static_text {
-                        title = string.format('%d fotos exportadas (full + thumbs) y enviadas correctamente.', #exportedData.fullPhotos),
+                        title = string.format(
+                            'Successful: %d of %d | Failed: %d',
+                            successCount,
+                            totalCount,
+                            failureCount
+                        ),
                     },
                     
                     f:spacer { height = 10 },
-                    
-                    f:static_text {
-                        title = 'Carpeta temporal:',
+                }
+                
+                -- Mostrar errores si los hay
+                if failureCount > 0 then
+                    table.insert(dialogComponents, f:static_text {
+                        title = 'Errors found:',
                         font = '<system/small>',
-                    },
+                    })
                     
-                    f:static_text {
-                        title = exportFolder,
-                        font = '<system/small>',
-                        text_color = LrView.kLabelColor,
-                    },
+                    for i = 1, math.min(3, failureCount) do
+                        local failure = uploadResult.failedUploads[i]
+                        table.insert(dialogComponents, f:static_text {
+                            title = string.format('• %s', getFileName(failure.mainPath) or 'Unknown'),
+                            font = '<system/small>',
+                            text_color = LrView.kLabelColor,
+                        })
+                    end
                     
-                    f:spacer { height = 15 },
+                    if failureCount > 3 then
+                        table.insert(dialogComponents, f:static_text {
+                            title = string.format('... and %d more', failureCount - 3),
+                            font = '<system/small>',
+                        })
+                    end
                     
-                    f:static_text {
-                        title = 'Visita tu galería en:',
-                    },
+                    table.insert(dialogComponents, f:spacer { height = 10 })
+                end
+                
+
+                
+                table.insert(dialogComponents, f:spacer { height = 15 })
+                
+                -- Enlace a Photoreka
+                if successCount > 0 then
+                    table.insert(dialogComponents, f:static_text {
+                        title = '🔎 Monitor processing here',
+                    })
                     
-                    f:row {
+                    table.insert(dialogComponents, f:row {
                         f:push_button {
-                            title = '🌐 www.photoreka.com',
+                            title = 'www.photoreka.com',
                             action = function()
-                                LrHttp.openUrlInBrowser('https://www.photoreka.com')
+                                LrHttp.openUrlInBrowser('https://www.photoreka.com/photo-hub#processing')
                             end,
                         },
-                    },
-                }
+                    })
+                    -- table.insert(dialogComponents, f:row {
+                    --     f:push_button {
+                    --         title = '🔎 Monitor processing here',
+                    --         action = function()
+                    --             LrHttp.openUrlInBrowser('https://www.photoreka.com/photo-hub#processing')
+                    --         end,
+                    --     },
+                    -- })
+                end
+                
+                local dialogResult = f:column(dialogComponents)
                 
                 LrDialogs.presentModalDialog({
                     title = 'Export to Photoreka',
