@@ -4,10 +4,12 @@ local LrApplication = import 'LrApplication'
 local LrDialogs = import 'LrDialogs'
 local LrView = import 'LrView'
 local LrBinding = import 'LrBinding'
-local LrExportSession = import 'LrExportSession'
-local LrPathUtils = import 'LrPathUtils'
-local LrFileUtils = import 'LrFileUtils'
 local LrFunctionContext = import 'LrFunctionContext'
+local LrHttp = import 'LrHttp'
+
+-- Servicios personalizados
+local ExportService = require 'ExportService'
+local ApiService = require 'ApiService'
 
 -- Ejecutar en un async task para permitir diálogos
 LrFunctionContext.callWithContext('showDialog', function(context)
@@ -104,69 +106,97 @@ LrFunctionContext.callWithContext('showDialog', function(context)
     
     -- Si el usuario hace clic en "Procesar"
     if result == 'ok' then
-        -- Crear carpeta temporal para las imágenes procesadas
-        local tempFolder = LrPathUtils.getStandardFilePath('temp')
-        local exportFolder = LrPathUtils.child(tempFolder, 'PhotorekaExport_' .. os.time())
-        LrFileUtils.createDirectory(exportFolder)
+        -- Crear carpeta temporal y configurar exportación
+        local exportFolder = ExportService.createTempFolder()
+        local exportSettings = ExportService.getExportSettings(exportFolder)
         
-        -- Configurar la sesión de exportación
-        local exportSettings = {
-            LR_export_destinationType = 'specificFolder',
-            LR_export_destinationPathPrefix = exportFolder,
-            LR_format = 'JPEG',
-            LR_jpeg_quality = 0.9,
-            LR_size_doConstrain = true,
-            LR_size_maxWidth = 1500,
-            LR_size_maxHeight = 1500,
-            LR_size_resolution = 72,
-            LR_size_resolutionUnits = 'inch',
-            LR_reimportExportedPhoto = false,
-            LR_export_colorSpace = 'sRGB',
-        }
-        
-        -- Ejecutar exportación en async task
+        -- Ejecutar exportación y envío en async task
         LrTasks.startAsyncTask(function()
             LrFunctionContext.callWithContext('exportPhotos', function(exportContext)
                 -- Mostrar barra de progreso
                 local progressScope = LrDialogs.showModalProgressDialog({
-                    title = 'Procesando fotos...',
+                    title = 'Procesando y enviando fotos...',
                     functionContext = exportContext,
                 })
                 
-                -- Realizar la exportación
-                local exportSession = LrExportSession({
-                    photosToExport = photos,
-                    exportSettings = exportSettings,
-                })
+                -- FASE 1: Exportación (50% del progreso total)
+                progressScope:setCaption('Fase 1/2: Exportando fotos...')
                 
-                local exportedFiles = {}
-                local totalPhotos = #photos
-                local currentPhoto = 0
-                
-                for _, rendition in exportSession:renditions() do
-                    currentPhoto = currentPhoto + 1
-                    progressScope:setPortionComplete(currentPhoto, totalPhotos)
-                    progressScope:setCaption(string.format('Procesando foto %d de %d...', currentPhoto, totalPhotos))
-                    
-                    local success, pathOrMessage = rendition:waitForRender()
-                    
-                    if success then
-                        table.insert(exportedFiles, pathOrMessage)
+                local exportedFiles = ExportService.exportPhotos(
+                    photos,
+                    exportSettings,
+                    function(current, total, caption)
+                        -- 0-50% del progreso total
+                        local progress = (current / total) * 0.5
+                        progressScope:setPortionComplete(progress, 1)
+                        progressScope:setCaption('Fase 1/2: ' .. caption)
                     end
-                end
+                )
+                
+                -- FASE 2: Envío por lotes a la API (50% restante)
+                progressScope:setCaption('Fase 2/2: Enviando fotos a Photoreka...')
+                
+                ApiService.uploadPhotos(
+                    exportedFiles,
+                    function(current, total, caption)
+                        -- 50-100% del progreso total
+                        local progress = 0.5 + (current / total) * 0.5
+                        progressScope:setPortionComplete(progress, 1)
+                        progressScope:setCaption('Fase 2/2: ' .. caption)
+                    end
+                )
                 
                 progressScope:done()
                 
-                -- Mostrar resultado
-                LrDialogs.message(
-                    'Exportación completada',
-                    string.format(
-                        '%d fotos procesadas correctamente.\n\nGuardadas en:\n%s\n\nListas para enviar a la API.',
-                        #exportedFiles,
-                        exportFolder
-                    ),
-                    'info'
-                )
+                -- Mostrar resultado final con enlace
+                local dialogResult = f:column {
+                    spacing = f:control_spacing(),
+                    
+                    f:static_text {
+                        title = '✓ Proceso completado con éxito',
+                        font = '<system/bold>',
+                    },
+                    
+                    f:separator { fill_horizontal = 1 },
+                    
+                    f:static_text {
+                        title = string.format('%d fotos exportadas y enviadas correctamente.', #exportedFiles),
+                    },
+                    
+                    f:spacer { height = 10 },
+                    
+                    f:static_text {
+                        title = 'Carpeta temporal:',
+                        font = '<system/small>',
+                    },
+                    
+                    f:static_text {
+                        title = exportFolder,
+                        font = '<system/small>',
+                        text_color = LrView.kLabelColor,
+                    },
+                    
+                    f:spacer { height = 15 },
+                    
+                    f:static_text {
+                        title = 'Visita tu galería en:',
+                    },
+                    
+                    f:row {
+                        f:push_button {
+                            title = '🌐 www.photoreka.com',
+                            action = function()
+                                LrHttp.openUrlInBrowser('https://www.photoreka.com')
+                            end,
+                        },
+                    },
+                }
+                
+                LrDialogs.presentModalDialog({
+                    title = 'Export to Photoreka',
+                    contents = dialogResult,
+                    actionVerb = 'Cerrar',
+                })
             end)
         end)
     end
