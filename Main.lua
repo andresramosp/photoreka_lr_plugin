@@ -142,11 +142,30 @@ LrFunctionContext.callWithContext('showDialog', function(context)
     
     -- Si el usuario hace clic en "Procesar"
     if result == 'ok' then
-        -- Crear carpeta temporal
-        local exportFolder = ExportService.createTempFolder()
-        
         -- Ejecutar exportación y envío en async task
         LrTasks.startAsyncTask(function()
+            -- PRIMERO: Verificar autenticación antes de iniciar la exportación
+            log:info("Usuario pulsó Procesar, verificando autenticación...")
+            local token = AuthService.ensureAuthenticated()
+            
+            if not token or token == '' then
+                log:info("Autenticación cancelada o falló, abortando proceso")
+                LrDialogs.message(
+                    'Export to Photoreka',
+                    'Proceso cancelado. Es necesario iniciar sesión para continuar.',
+                    'info'
+                )
+                return
+            end
+            
+            log:info("Autenticación exitosa, iniciando exportación...")
+            
+            -- Crear carpeta temporal
+            local exportFolder = ExportService.createTempFolder()
+            
+            -- Variable para almacenar resultados
+            local uploadResult = nil
+            
             LrFunctionContext.callWithContext('exportPhotos', function(exportContext)
                 -- Mostrar barra de progreso
                 local progressScope = LrDialogs.showModalProgressDialog({
@@ -208,7 +227,7 @@ LrFunctionContext.callWithContext('showDialog', function(context)
                 exportedData.exifDataList = exifDataList
                 exportedData.sourceDataList = sourceDataList
                 
-                local uploadResult = ApiService.uploadPhotos(
+                uploadResult = ApiService.uploadPhotos(
                     exportedData,
                     function(current, total, caption)
                         -- 50-100% del progreso total
@@ -218,111 +237,114 @@ LrFunctionContext.callWithContext('showDialog', function(context)
                     end
                 )
                 
+                -- Cerrar el diálogo de progreso
                 progressScope:done()
                 
-                -- Preparar mensaje de resultado
-                local successCount = #uploadResult.successfulUploads
-                local failureCount = #uploadResult.failedUploads
-                local totalCount = successCount + failureCount
+            end) -- Fin del contexto de progreso
+            
+            -- Verificar que se haya completado el proceso
+            if not uploadResult then
+                log:error("Error: No se obtuvieron resultados del upload")
+                return
+            end
+            
+            -- Esperar un momento para asegurar que el diálogo de progreso se cierre
+            LrTasks.sleep(0.3)
+            
+            -- Preparar mensaje de resultado
+            local successCount = #uploadResult.successfulUploads
+            local failureCount = #uploadResult.failedUploads
+            local totalCount = successCount + failureCount
+            
+            local statusText
+            local statusFont
+            if failureCount == 0 then
+                statusText = '✓ Process completed successfully'
+                statusFont = '<system/bold>'
+            elseif successCount == 0 then
+                statusText = '✗ Error: No photos could be uploaded'
+                statusFont = '<system/bold>'
+            else
+                statusText = '⚠ Process completed with errors'
+                statusFont = '<system/bold>'
+            end
+            
+            -- Construir diálogo de resultado
+            local dialogComponents = {
+                spacing = f:control_spacing(),
                 
-                local statusText
-                local statusFont
-                if failureCount == 0 then
-                    statusText = '✓ Process completed successfully'
-                    statusFont = '<system/bold>'
-                elseif successCount == 0 then
-                    statusText = '✗ Error: No photos could be uploaded'
-                    statusFont = '<system/bold>'
-                else
-                    statusText = '⚠ Process completed with errors'
-                    statusFont = '<system/bold>'
+                f:static_text {
+                    title = statusText,
+                    font = statusFont,
+                },
+                
+                f:separator { fill_horizontal = 1 },
+                
+                f:static_text {
+                    title = string.format(
+                        'Successful: %d of %d | Failed: %d',
+                        successCount,
+                        totalCount,
+                        failureCount
+                    ),
+                },
+                
+                f:spacer { height = 10 },
+            }
+            
+            -- Mostrar errores si los hay
+            if failureCount > 0 then
+                table.insert(dialogComponents, f:static_text {
+                    title = 'Errors found:',
+                    font = '<system/small>',
+                })
+                
+                for i = 1, math.min(3, failureCount) do
+                    local failure = uploadResult.failedUploads[i]
+                    table.insert(dialogComponents, f:static_text {
+                        title = string.format('• %s', getFileName(failure.mainPath) or 'Unknown'),
+                        font = '<system/small>',
+                        text_color = LrView.kLabelColor,
+                    })
                 end
                 
-                -- Construir diálogo de resultado
-                local dialogComponents = {
-                    spacing = f:control_spacing(),
-                    
-                    f:static_text {
-                        title = statusText,
-                        font = statusFont,
-                    },
-                    
-                    f:separator { fill_horizontal = 1 },
-                    
-                    f:static_text {
-                        title = string.format(
-                            'Successful: %d of %d | Failed: %d',
-                            successCount,
-                            totalCount,
-                            failureCount
-                        ),
-                    },
-                    
-                    f:spacer { height = 10 },
-                }
-                
-                -- Mostrar errores si los hay
-                if failureCount > 0 then
+                if failureCount > 3 then
                     table.insert(dialogComponents, f:static_text {
-                        title = 'Errors found:',
+                        title = string.format('... and %d more', failureCount - 3),
                         font = '<system/small>',
                     })
-                    
-                    for i = 1, math.min(3, failureCount) do
-                        local failure = uploadResult.failedUploads[i]
-                        table.insert(dialogComponents, f:static_text {
-                            title = string.format('• %s', getFileName(failure.mainPath) or 'Unknown'),
-                            font = '<system/small>',
-                            text_color = LrView.kLabelColor,
-                        })
-                    end
-                    
-                    if failureCount > 3 then
-                        table.insert(dialogComponents, f:static_text {
-                            title = string.format('... and %d more', failureCount - 3),
-                            font = '<system/small>',
-                        })
-                    end
-                    
-                    table.insert(dialogComponents, f:spacer { height = 10 })
                 end
                 
-
-                
-                table.insert(dialogComponents, f:spacer { height = 15 })
-                
-                -- Enlace a Photoreka
-                if successCount > 0 then
-                    table.insert(dialogComponents, f:static_text {
-                        title = '🔎 Monitor processing here',
-                    })
-                    
-                    table.insert(dialogComponents, f:row {
-                        f:push_button {
-                            title = 'www.photoreka.com',
-                            action = function()
-                                LrHttp.openUrlInBrowser('https://www.photoreka.com/photo-hub#processing')
-                            end,
-                        },
-                    })
-                    -- table.insert(dialogComponents, f:row {
-                    --     f:push_button {
-                    --         title = '🔎 Monitor processing here',
-                    --         action = function()
-                    --             LrHttp.openUrlInBrowser('https://www.photoreka.com/photo-hub#processing')
-                    --         end,
-                    --     },
-                    -- })
-                end
-                
-                local dialogResult = f:column(dialogComponents)
-                
-                LrDialogs.presentModalDialog({
-                    title = 'Export to Photoreka',
-                    contents = dialogResult,
-                    actionVerb = 'Cerrar',
+                table.insert(dialogComponents, f:spacer { height = 10 })
+            end
+            
+            
+            
+            table.insert(dialogComponents, f:spacer { height = 15 })
+            
+            -- Enlace a Photoreka
+            if successCount > 0 then
+                table.insert(dialogComponents, f:static_text {
+                    title = '🔎 Monitor processing here',
                 })
-            end)
+                
+                table.insert(dialogComponents, f:row {
+                    f:push_button {
+                        title = 'www.photoreka.com',
+                        action = function()
+                            LrHttp.openUrlInBrowser('https://www.photoreka.com/photo-hub#processing')
+                        end,
+                    },
+                })
+            end
+            
+            local dialogResult = f:column(dialogComponents)
+            
+            LrDialogs.presentModalDialog({
+                title = 'Export to Photoreka',
+                contents = dialogResult,
+                actionVerb = 'Cerrar',
+            })
         end)
     end
     
