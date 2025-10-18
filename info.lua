@@ -5,11 +5,13 @@ return {
     LrPluginName = "Photoreka",
     LrInitPlugin = "Init.lua",
     
+    -- VERSION = { major=1, minor=0, revision=0, build=0 },
+    
     -- Agrega un ítem de menú en Biblioteca > Extras del módulo
     LrLibraryMenuItems = {
         {
             title = "Export to Photoreka",
-            file = "Dialogs.lua", -- Lightroom ejecuta este archivo al hacer clic
+            file = "Main.lua",
         },
     },
 
@@ -17,7 +19,7 @@ return {
     LrExportMenuItems = {
         {
             title = "Export to Photoreka",
-            file = "Dialogs.lua", -- también accesible desde Archivo > Extras del módulo
+            file = "Main.lua",
         },
     },
 }
