@@ -7,9 +7,10 @@ local LrBinding = import 'LrBinding'
 local LrExportSession = import 'LrExportSession'
 local LrPathUtils = import 'LrPathUtils'
 local LrFileUtils = import 'LrFileUtils'
+local LrFunctionContext = import 'LrFunctionContext'
 
 -- Ejecutar en un async task para permitir diálogos
-LrTasks.startAsyncTask(function()
+LrFunctionContext.callWithContext('showDialog', function(context)
     
     local catalog = LrApplication.activeCatalog()
     local photos = {}
@@ -94,14 +95,12 @@ LrTasks.startAsyncTask(function()
     }
     
     -- Mostrar el diálogo con botón "Procesar"
-    local result = LrDialogs.presentModalDialog {
+    local result = LrDialogs.presentModalDialog({
         title = 'Export to Photoreka',
         contents = dialogContent,
-        actionBinding = {
-            { title = 'Procesar', verb = 'ok' },
-            { title = 'Cancelar', verb = 'cancel' },
-        },
-    }
+        actionVerb = 'Procesar',
+        cancelVerb = 'Cancelar',
+    })
     
     -- Si el usuario hace clic en "Procesar"
     if result == 'ok' then
@@ -125,49 +124,50 @@ LrTasks.startAsyncTask(function()
             LR_export_colorSpace = 'sRGB',
         }
         
-        -- Mostrar barra de progreso
-        LrDialogs.attachErrorDialogToFunctionContext(function(context)
-            local progressScope = LrDialogs.showModalProgressDialog {
-                title = 'Procesando fotos...',
-                functionContext = context,
-            }
-            
-            -- Realizar la exportación
-            local exportSession = LrExportSession {
-                photosToExport = photos,
-                exportSettings = exportSettings,
-            }
-            
-            local exportedFiles = {}
-            local totalPhotos = #photos
-            local currentPhoto = 0
-            
-            for _, rendition in exportSession:renditions() do
-                currentPhoto = currentPhoto + 1
-                progressScope:setPortionComplete(currentPhoto, totalPhotos)
-                progressScope:setCaption(string.format('Procesando foto %d de %d...', currentPhoto, totalPhotos))
+        -- Ejecutar exportación en async task
+        LrTasks.startAsyncTask(function()
+            LrFunctionContext.callWithContext('exportPhotos', function(exportContext)
+                -- Mostrar barra de progreso
+                local progressScope = LrDialogs.showModalProgressDialog({
+                    title = 'Procesando fotos...',
+                    functionContext = exportContext,
+                })
                 
-                local success, pathOrMessage = rendition:waitForRender()
+                -- Realizar la exportación
+                local exportSession = LrExportSession({
+                    photosToExport = photos,
+                    exportSettings = exportSettings,
+                })
                 
-                if success then
-                    table.insert(exportedFiles, pathOrMessage)
-                else
-                    LrDialogs.message('Error', 'Error al procesar una foto: ' .. pathOrMessage, 'warning')
+                local exportedFiles = {}
+                local totalPhotos = #photos
+                local currentPhoto = 0
+                
+                for _, rendition in exportSession:renditions() do
+                    currentPhoto = currentPhoto + 1
+                    progressScope:setPortionComplete(currentPhoto, totalPhotos)
+                    progressScope:setCaption(string.format('Procesando foto %d de %d...', currentPhoto, totalPhotos))
+                    
+                    local success, pathOrMessage = rendition:waitForRender()
+                    
+                    if success then
+                        table.insert(exportedFiles, pathOrMessage)
+                    end
                 end
-            end
-            
-            progressScope:done()
-            
-            -- Mostrar resultado
-            LrDialogs.message(
-                'Exportación completada',
-                string.format(
-                    '%d fotos procesadas correctamente.\n\nGuardadas en:\n%s\n\nListas para enviar a la API.',
-                    #exportedFiles,
-                    exportFolder
-                ),
-                'info'
-            )
+                
+                progressScope:done()
+                
+                -- Mostrar resultado
+                LrDialogs.message(
+                    'Exportación completada',
+                    string.format(
+                        '%d fotos procesadas correctamente.\n\nGuardadas en:\n%s\n\nListas para enviar a la API.',
+                        #exportedFiles,
+                        exportFolder
+                    ),
+                    'info'
+                )
+            end)
         end)
     end
     
