@@ -15,6 +15,22 @@ local function toISODate(timestamp)
     return nil
 end
 
+-- Función para convertir velocidad de obturación a formato legible
+local function formatShutterSpeed(speed)
+    if not speed or type(speed) ~= "number" then
+        return nil
+    end
+    
+    -- Si es mayor o igual a 1 segundo, mostrar como "2s", "5s", etc.
+    if speed >= 1 then
+        return string.format("%.1fs", speed)
+    end
+    
+    -- Si es menor a 1 segundo, mostrar como fracción "1/160", "1/250", etc.
+    local denominator = math.floor(1 / speed + 0.5)
+    return "1/" .. tostring(denominator)
+end
+
 -- Mapeo flexible de campos EXIF (múltiples variantes posibles por campo)
 local fieldMapping = {
     -- Para fechas, preferir ISO8601 que ya viene formateado
@@ -114,10 +130,17 @@ function ExifService.extractExifData(photo)
     -- Intentar primero con formato ISO8601 que ya viene bien formateado
     local dateTimeOriginalISO = extractRawValue(rawMetadata, fieldMapping.dateTimeOriginalISO, "Fecha ISO")
     if dateTimeOriginalISO then
-        -- Ya está en formato ISO, solo necesitamos agregar milisegundos y Z si no los tiene
-        if not dateTimeOriginalISO:match("%.%d+Z$") then
-            exifData.dateTaken = dateTimeOriginalISO .. ".000Z"
+        -- Normalizar formato: remover zona horaria si existe y asegurar formato UTC con .000Z
+        -- Ejemplos: "2025-09-10T20:03:28.867+08:00" -> "2025-09-10T20:03:28.000Z"
+        --           "2025-09-10T20:03:28" -> "2025-09-10T20:03:28.000Z"
+        
+        -- Extraer solo la parte de fecha y hora (sin zona horaria ni milisegundos)
+        local dateTimePart = dateTimeOriginalISO:match("^(%d%d%d%d%-%d%d%-%d%dT%d%d:%d%d:%d%d)")
+        
+        if dateTimePart then
+            exifData.dateTaken = dateTimePart .. ".000Z"
         else
+            -- Si no podemos parsear, usar como está
             exifData.dateTaken = dateTimeOriginalISO
         end
     else

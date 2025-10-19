@@ -201,6 +201,22 @@ function AuthService.showLoginDialog()
             bind_to_object = properties,  -- CLAVE: enlazar el dialog a properties
             spacing = f:control_spacing(),
             
+            -- Logo grande centrado
+            f:row {
+                fill_horizontal = 1,
+                
+                f:spacer { fill_horizontal = 1 },
+                
+                f:picture {
+                    value = _PLUGIN.path .. '/logo_full.png',
+                    height = 100
+                },
+                
+                f:spacer { fill_horizontal = 1 },
+            },
+            
+            f:spacer { height = 8 },
+            
             f:static_text {
                 title = 'Iniciar sesión en Photoreka',
                 font = '<system/bold>',
@@ -208,49 +224,59 @@ function AuthService.showLoginDialog()
             
             f:separator { fill_horizontal = 1 },
             
-            f:spacer { height = 10 },
+            f:spacer { height = 8 },
             
             f:row {
-                spacing = f:label_spacing(),
+                fill_horizontal = 1,
                 
-                f:static_text {
-                    title = 'Email:',
-                    alignment = 'right',
-                    width = LrView.share('label_width'),
-                },
+                f:spacer { fill_horizontal = 1 },
                 
-                f:edit_field {
-                    value = LrView.bind('email'),
-                    width_in_chars = 30,
-                    immediate = true,
-                    enabled = LrView.bind {
-                        key = 'loginInProgress',
-                        transform = function(value) return not value end,
+                f:column {
+                    spacing = f:control_spacing(),
+                    
+                    f:row {
+                        spacing = f:label_spacing(),
+                        
+                        f:static_text {
+                            title = 'Email:',
+                            alignment = 'right',
+                            width = LrView.share('label_width'),
+                        },
+                        
+                        f:edit_field {
+                            value = LrView.bind('email'),
+                            width_in_chars = 30,
+                            immediate = true,
+                            enabled = LrView.bind {
+                                key = 'loginInProgress',
+                                transform = function(value) return not value end,
+                            },
+                        },
+                    },
+                    
+                    f:row {
+                        spacing = f:label_spacing(),
+                        
+                        f:static_text {
+                            title = 'Password:',
+                            alignment = 'right',
+                            width = LrView.share('label_width'),
+                        },
+                        
+                        f:password_field {
+                            value = LrView.bind('password'),
+                            width_in_chars = 30,
+                            immediate = true,
+                            enabled = LrView.bind {
+                                key = 'loginInProgress',
+                                transform = function(value) return not value end,
+                            },
+                        },
                     },
                 },
-            },
-            
-            f:row {
-                spacing = f:label_spacing(),
                 
-                f:static_text {
-                    title = 'Password:',
-                    alignment = 'right',
-                    width = LrView.share('label_width'),
-                },
-                
-                f:password_field {
-                    value = LrView.bind('password'),
-                    width_in_chars = 30,
-                    immediate = true,
-                    enabled = LrView.bind {
-                        key = 'loginInProgress',
-                        transform = function(value) return not value end,
-                    },
-                },
+                f:spacer { fill_horizontal = 1 },
             },
-            
-            f:spacer { height = 10 },
             
             -- Mensaje de error
             f:row {
@@ -271,18 +297,7 @@ function AuthService.showLoginDialog()
                 },
             },
             
-            -- Mensaje de "autenticando..."
-            f:row {
-                visible = LrView.bind('loginInProgress'),
-                
-                f:static_text {
-                    title = 'Autenticando...',
-                    font = '<system/small>',
-                    text_color = LrView.kLabelColor,
-                },
-            },
-            
-            f:spacer { height = 5 },
+           
             
             -- Info de usuario guardado
             f:row {
@@ -398,6 +413,18 @@ function AuthService.showAccountDialog()
         
         local dialogContent = f:column {
             spacing = f:control_spacing(),
+            
+            -- Logo pequeño
+            f:row {
+                fill_horizontal = 1,
+                
+                f:picture {
+                    value = _PLUGIN.path .. '/logo_full.png',
+                    height = 100,
+                },
+            },
+            
+            f:spacer { height = 10 },
             
             f:static_text {
                 title = 'Cuenta de Photoreka',

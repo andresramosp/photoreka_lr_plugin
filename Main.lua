@@ -111,6 +111,18 @@ LrFunctionContext.callWithContext('showDialog', function(context)
         bind_to_object = props,
         spacing = f:control_spacing(),
         
+        -- Logo pequeño
+        f:row {
+            fill_horizontal = 1,
+            
+            f:picture {
+                value = _PLUGIN.path .. '/logo_full.png',
+                height = 100,
+            },
+        },
+        
+        f:spacer { height = 10 },
+        
         -- Header con título y botón de cuenta
         f:row {
             fill_horizontal = 1,
@@ -178,7 +190,7 @@ LrFunctionContext.callWithContext('showDialog', function(context)
                 log:info("Autenticación cancelada o falló, abortando proceso")
                 LrDialogs.message(
                     'Export to Photoreka',
-                    'Proceso cancelado. Es necesario iniciar sesión para continuar.',
+                    'Process cancelled. You must log in to continue.',
                     'info'
                 )
                 return
@@ -295,6 +307,22 @@ LrFunctionContext.callWithContext('showDialog', function(context)
             local dialogComponents = {
                 spacing = f:control_spacing(),
                 
+                -- Logo
+                f:row {
+                    fill_horizontal = 1,
+                    
+                    f:spacer { fill_horizontal = 1 },
+                    
+                    f:picture {
+                        value = _PLUGIN.path .. '/logo_full.png',
+                        height = 80,
+                    },
+                    
+                    f:spacer { fill_horizontal = 1 },
+                },
+                
+                f:spacer { height = 8 },
+                
                 f:static_text {
                     title = statusText,
                     font = statusFont,
@@ -342,7 +370,7 @@ LrFunctionContext.callWithContext('showDialog', function(context)
             
             
             
-            table.insert(dialogComponents, f:spacer { height = 15 })
+            -- table.insert(dialogComponents, f:spacer { height = 15 })
             
             -- Enlace a Photoreka (varía según el modo)
             if successCount > 0 then
@@ -361,7 +389,7 @@ LrFunctionContext.callWithContext('showDialog', function(context)
                 
                 table.insert(dialogComponents, f:row {
                     f:push_button {
-                        title = 'www.photoreka.com',
+                        title = linkUrl,
                         action = function()
                             LrHttp.openUrlInBrowser(linkUrl)
                         end,
