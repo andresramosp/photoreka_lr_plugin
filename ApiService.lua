@@ -333,8 +333,10 @@ end
 -- Parámetros:
 --   photoData: tabla con {fullPhotos = {...}, thumbPhotos = {...}, exifDataList = {...}, sourceDataList = {...}}
 --   progressCallback: función que recibe (current, total, caption)
+--   onlyToLightbox: booleano, si es true no se llama a triggerProcess
 -- Retorna: tabla con {successfulUploads = {...}, failedUploads = {...}}
-function ApiService.uploadPhotos(photoData, progressCallback)
+function ApiService.uploadPhotos(photoData, progressCallback, onlyToLightbox)
+    onlyToLightbox = onlyToLightbox or false
     local fullPhotos = photoData.fullPhotos or {}
     local thumbPhotos = photoData.thumbPhotos or {}
     local exifDataList = photoData.exifDataList or {}
@@ -347,6 +349,7 @@ function ApiService.uploadPhotos(photoData, progressCallback)
     log:info("Full photos: " .. tostring(#fullPhotos))
     log:info("Thumb photos: " .. tostring(#thumbPhotos))
     log:info("EXIF data: " .. tostring(#exifDataList))
+    log:info("Only to Lightbox: " .. tostring(onlyToLightbox))
     log:info("Concurrent uploads: " .. tostring(Config.CONCURRENT_UPLOADS))
     log:info("========================================")
     
@@ -422,8 +425,8 @@ function ApiService.uploadPhotos(photoData, progressCallback)
     log:info("Fallidas: " .. tostring(#failedUploads))
     log:info("========================================")
     
-    -- Si hubo éxitos, trigger preprocessing
-    if #successfulUploads > 0 then
+    -- Si hubo éxitos Y NO es solo para lightbox, trigger preprocessing
+    if #successfulUploads > 0 and not onlyToLightbox then
         log:info("Triggering preprocessing...")
         
         -- Extraer IDs de las fotos subidas exitosamente
@@ -446,6 +449,8 @@ function ApiService.uploadPhotos(photoData, progressCallback)
         else
             log:info("Preprocessing triggered OK")
         end
+    elseif onlyToLightbox then
+        log:info("Modo 'Only to Lightbox' activado - no se ejecuta preprocessing")
     end
     
     return {

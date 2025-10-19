@@ -8,10 +8,14 @@ local Config = {}
 -- URL base de la API de Photoreka
 -- En desarrollo: 'http://localhost:3333'
 -- En producción: 'https://api.photoreka.com' (o tu dominio)
-Config.API_BASE_URL = 'http://localhost:3333'
+-- Config.API_BASE_URL = 'http://localhost:3333'
+Config.API_BASE_URL = 'https://curatorlabapi-production.up.railway.app'
+
 
 -- URL de la API del Analyzer (normalmente la misma que API_BASE_URL)
-Config.ANALYZER_API_BASE_URL = 'http://localhost:3333'
+-- Config.ANALYZER_API_BASE_URL = 'http://localhost:3333'
+Config.ANALYZER_API_BASE_URL = 'https://photorekaanalyzerapi-production.up.railway.app'
+
 
 -- ========================================
 -- CONFIGURACIÓN DE EXPORTACIÓN

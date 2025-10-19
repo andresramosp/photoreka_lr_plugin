@@ -71,24 +71,75 @@ LrFunctionContext.callWithContext('showDialog', function(context)
     -- Crear el grid de miniaturas
     local f = LrView.osFactory()
     
+    -- Crear propiedades observables para el checkbox
+    local props = LrBinding.makePropertyTable(context)
+    props.onlyToLightbox = false
+    
+    -- Lista de fotos que se puede modificar - usando tabla con índices
+    local photosToProcess = {}
+    for i, photo in ipairs(photos) do
+        photosToProcess[i] = {
+            photo = photo,
+            removed = false
+        }
+    end
+    
+    -- Contador de fotos activas
+    local function countActivePhotos()
+        local count = 0
+        for _, item in ipairs(photosToProcess) do
+            if not item.removed then
+                count = count + 1
+            end
+        end
+        return count
+    end
+    
     -- Construir el grid con miniaturas
     local thumbnailRows = {}
     local photosPerRow = 4
     local currentRow = {}
     
-    for i, photo in ipairs(photos) do
-        table.insert(currentRow, f:catalog_photo {
-            photo = photo,
-            width = 150,
-            height = 150,
-        })
+    for i, photoItem in ipairs(photosToProcess) do
+        -- Crear propiedad observable para visibilidad
+        props['photo_' .. i .. '_visible'] = true
+        
+        -- Cada miniatura con su botón de eliminar
+        local thumbnailItem = f:column {
+            spacing = f:label_spacing(),
+            visible = LrView.bind('photo_' .. i .. '_visible'),
+            
+            f:catalog_photo {
+                photo = photoItem.photo,
+                width = 150,
+                height = 150,
+            },
+            
+            f:push_button {
+                title = '🗑️ Remove',
+                font = '<system/small>',
+                action = function()
+                    -- Marcar como eliminada
+                    photosToProcess[i].removed = true
+                    props['photo_' .. i .. '_visible'] = false
+                    
+                    -- Actualizar el contador
+                    props.photoCount = countActivePhotos()
+                end,
+            },
+        }
+        
+        table.insert(currentRow, thumbnailItem)
         
         -- Si completamos una fila o es la última foto
-        if #currentRow == photosPerRow or i == #photos then
+        if #currentRow == photosPerRow or i == #photosToProcess then
             table.insert(thumbnailRows, f:row(currentRow))
             currentRow = {}
         end
     end
+    
+    -- Inicializar el contador
+    props.photoCount = countActivePhotos()
     
     -- Obtener información del usuario autenticado (si existe)
     local userInfo = AuthService.getStoredUserInfo()
@@ -96,6 +147,7 @@ LrFunctionContext.callWithContext('showDialog', function(context)
     
     -- Crear el contenido del diálogo
     local dialogContent = f:column {
+        bind_to_object = props,
         spacing = f:control_spacing(),
         
         -- Header con título y botón de cuenta
@@ -103,7 +155,12 @@ LrFunctionContext.callWithContext('showDialog', function(context)
             fill_horizontal = 1,
             
             f:static_text {
-                title = string.format('Fotos seleccionadas: %d', #photos),
+                title = LrView.bind {
+                    key = 'photoCount',
+                    transform = function(value)
+                        return string.format('Fotos seleccionadas: %d', value)
+                    end
+                },
                 font = '<system/bold>',
             },
             
@@ -129,6 +186,11 @@ LrFunctionContext.callWithContext('showDialog', function(context)
         
         f:separator { fill_horizontal = 1 },
         
+        -- Checkbox para modo "Only to Lightbox"
+        f:checkbox {
+            title = 'Only to Lightbox (check for reviewing duplicates)',
+            value = LrView.bind('onlyToLightbox'),
+        },
 
     }
     
@@ -142,6 +204,23 @@ LrFunctionContext.callWithContext('showDialog', function(context)
     
     -- Si el usuario hace clic en "Procesar"
     if result == 'ok' then
+        -- Construir lista de fotos no eliminadas
+        local finalPhotosToProcess = {}
+        for _, item in ipairs(photosToProcess) do
+            if not item.removed then
+                table.insert(finalPhotosToProcess, item.photo)
+            end
+        end
+        
+        -- Verificar que aún hay fotos para procesar
+        if #finalPhotosToProcess == 0 then
+            LrDialogs.message('Export to Photoreka', 'No hay fotos para procesar.', 'info')
+            return
+        end
+        
+        -- Capturar el valor del checkbox antes de salir del contexto
+        local onlyToLightbox = props.onlyToLightbox
+        
         -- Ejecutar exportación y envío en async task
         LrTasks.startAsyncTask(function()
             -- PRIMERO: Verificar autenticación antes de iniciar la exportación
@@ -177,7 +256,7 @@ LrFunctionContext.callWithContext('showDialog', function(context)
                 progressScope:setCaption('Fase 1/3: Exportando fotos (full + thumbs)...')
                 
                 local exportedData = ExportService.exportPhotos(
-                    photos,
+                    finalPhotosToProcess,
                     exportFolder,
                     function(current, total, caption)
                         -- 0-40% del progreso total
@@ -192,8 +271,8 @@ LrFunctionContext.callWithContext('showDialog', function(context)
                 
                 local exifDataList = {}
                 local sourceDataList = {}
-                for i, photo in ipairs(photos) do
-                    local progress = 0.4 + (i / #photos) * 0.1
+                for i, photo in ipairs(finalPhotosToProcess) do
+                    local progress = 0.4 + (i / #finalPhotosToProcess) * 0.1
                     progressScope:setPortionComplete(progress, 1)
                     
                     -- Extraer uniqueId de Lightroom
@@ -234,7 +313,8 @@ LrFunctionContext.callWithContext('showDialog', function(context)
                         local progress = 0.5 + (current / total) * 0.5
                         progressScope:setPortionComplete(progress, 1)
                         progressScope:setCaption('Fase 3/3: ' .. caption)
-                    end
+                    end,
+                    onlyToLightbox  -- Pasar el parámetro onlyToLightbox
                 )
                 
                 -- Cerrar el diálogo de progreso
@@ -322,17 +402,26 @@ LrFunctionContext.callWithContext('showDialog', function(context)
             
             table.insert(dialogComponents, f:spacer { height = 15 })
             
-            -- Enlace a Photoreka
+            -- Enlace a Photoreka (varía según el modo)
             if successCount > 0 then
+                local linkText, linkUrl
+                if onlyToLightbox then
+                    linkText = '🔎 Review your photos here before processing'
+                    linkUrl = 'https://www.photoreka.com/photo-hub#upload'
+                else
+                    linkText = '🔎 Monitor processing here'
+                    linkUrl = 'https://www.photoreka.com/photo-hub#processing'
+                end
+                
                 table.insert(dialogComponents, f:static_text {
-                    title = '🔎 Monitor processing here',
+                    title = linkText,
                 })
                 
                 table.insert(dialogComponents, f:row {
                     f:push_button {
                         title = 'www.photoreka.com',
                         action = function()
-                            LrHttp.openUrlInBrowser('https://www.photoreka.com/photo-hub#processing')
+                            LrHttp.openUrlInBrowser(linkUrl)
                         end,
                     },
                 })
