@@ -32,23 +32,82 @@ local function getFileName(filePath)
     return nil
 end
 
--- Ejecutar en un async task para permitir diálogos
+-- Envolver todo en una tarea async para evitar errores de "wait from within a task"
+LrTasks.startAsyncTask(function()
 LrFunctionContext.callWithContext('showDialog', function(context)
     
     local catalog = LrApplication.activeCatalog()
     local photos = {}
     local hasSelection = false
+    local shouldCheckSources = false
+    local activeSources = {}
+    local singlePhoto = nil
+    local isAutoSelectionFirst = false -- Heuristic: auto-selected first photo of active source
     
     -- Leer del catálogo TODO de una vez
     catalog:withReadAccessDo(function()
         -- Verificar si hay una selección explícita usando getTargetPhoto (singular)
         -- Si devuelve nil, no hay selección
-        local singlePhoto = catalog:getTargetPhoto()
-        hasSelection = (singlePhoto ~= nil)
+    singlePhoto = catalog:getTargetPhoto()
+    hasSelection = (singlePhoto ~= nil)
         
         -- Obtener todas las fotos target
         photos = catalog:getTargetPhotos()
+        
+        -- Si solo hay 1 foto seleccionada, marcar para verificar fuentes activas
+        if #photos == 1 then
+            shouldCheckSources = true
+            activeSources = catalog:getActiveSources()
+        end
     end)
+    
+    -- FUERA de withReadAccessDo: decidir si expandimos a colecciones activas
+    -- Regla: SOLO si la única foto seleccionada es la primera de alguna fuente activa
+    if shouldCheckSources and activeSources and #activeSources > 0 and singlePhoto then
+        -- Primero detectar si coincide con el primer elemento de alguna fuente
+        for _, source in ipairs(activeSources) do
+            if source.getPhotos then
+                local photosFromSource = source:getPhotos()
+                if photosFromSource and #photosFromSource > 0 then
+                    local firstPhoto = photosFromSource[1]
+                    if firstPhoto and firstPhoto.localIdentifier == singlePhoto.localIdentifier then
+                        isAutoSelectionFirst = true
+                        break
+                    end
+                end
+            end
+        end
+
+        -- Si es la primera, ahora sí cargamos TODAS las fotos de las fuentes activas
+        if isAutoSelectionFirst then
+            local sourcePhotos = {}
+            for _, source in ipairs(activeSources) do
+                if source.getPhotos then
+                    local photosFromSource = source:getPhotos()
+                    if photosFromSource then
+                        for _, p in ipairs(photosFromSource) do
+                            table.insert(sourcePhotos, p)
+                        end
+                    end
+                end
+            end
+
+            -- Nota: aquí podría haber ambigüedad en el futuro. Ver TODO abajo.
+            log:info(string.format(
+                "Detected single selection equals first photo of an active source. Expanding to full sources (%d photos).",
+                #sourcePhotos
+            ))
+            photos = sourcePhotos
+        else
+            -- El usuario seleccionó explícitamente una foto (no la primera). Respetar esa única selección.
+            log:info("Single selected photo is not the first in active source(s). Treating as explicit single selection.")
+        end
+    end
+
+    -- TODO: Ambigüedad y mejoras futuras
+    -- 1) Preguntar al usuario cuando haya 1 seleccionada y active sources: "Process selected (1) or all from source (X)?"
+    -- 2) Detectar y excluir la fuente "All Photographs" para evitar expandir el catálogo completo por accidente.
+    -- 3) Agregar una preferencia en Config para controlar este comportamiento.
     
     -- Ya estamos FUERA del withReadAccessDo - ahora podemos mostrar diálogos
     
@@ -406,4 +465,5 @@ LrFunctionContext.callWithContext('showDialog', function(context)
         end)
     end
     
+end)
 end)
