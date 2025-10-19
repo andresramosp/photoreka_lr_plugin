@@ -35,4 +35,11 @@ Config.MAX_RETRIES = 3
 -- Número de subidas simultáneas (concurrencia)
 Config.CONCURRENT_UPLOADS = 5
 
+-- ========================================
+-- CONFIGURACIÓN DE LÍMITES
+-- ========================================
+
+-- Número máximo de fotos que se pueden procesar en una sola exportación
+Config.MAX_PHOTOS = 2000
+
 return Config

@@ -37,34 +37,38 @@ LrFunctionContext.callWithContext('showDialog', function(context)
     
     local catalog = LrApplication.activeCatalog()
     local photos = {}
+    local hasSelection = false
     
     -- Leer del catálogo TODO de una vez
     catalog:withReadAccessDo(function()
-        -- Intentar obtener fotos seleccionadas
-        photos = catalog:getTargetPhotos()
+        -- Verificar si hay una selección explícita usando getTargetPhoto (singular)
+        -- Si devuelve nil, no hay selección
+        local singlePhoto = catalog:getTargetPhoto()
+        hasSelection = (singlePhoto ~= nil)
         
-        -- Si no hay selección, intentar con fuentes activas
-        if not photos or #photos == 0 then
-            local sources = catalog:getActiveSources()
-            if sources and #sources > 0 then
-                for _, source in ipairs(sources) do
-                    if source.getPhotos then
-                        local sourcePhotos = source:getPhotos()
-                        if sourcePhotos then
-                            for _, p in ipairs(sourcePhotos) do
-                                table.insert(photos, p)
-                            end
-                        end
-                    end
-                end
-            end
-        end
+        -- Obtener todas las fotos target
+        photos = catalog:getTargetPhotos()
     end)
     
     -- Ya estamos FUERA del withReadAccessDo - ahora podemos mostrar diálogos
     
-    if #photos == 0 then
-        LrDialogs.message('Export to Photoreka', 'No hay fotos seleccionadas.', 'info')
+    -- Validar que haya fotos seleccionadas explícitamente
+    if not hasSelection or not photos or #photos == 0 then
+        LrDialogs.message(
+            'Export to Photoreka', 
+            'Please select photos before exporting.', 
+            'info'
+        )
+        return
+    end
+    
+    -- Validar que no se exceda el máximo de fotos
+    if #photos > Config.MAX_PHOTOS then
+        LrDialogs.message(
+            'Export to Photoreka', 
+            string.format('You can only process up to %d photos at a time. You have selected %d photos.', Config.MAX_PHOTOS, #photos), 
+            'warning'
+        )
         return
     end
     
