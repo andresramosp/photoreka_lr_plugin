@@ -23,7 +23,7 @@ Config.ANALYZER_API_BASE_URL = 'https://photorekaanalyzerapi-production.up.railw
 
 -- true = usar EXIF inventados para pruebas
 -- false = extraer EXIF reales de las fotos
-Config.USE_MOCK_EXIF = true
+Config.USE_MOCK_EXIF = false
 
 -- ========================================
 -- CONFIGURACIÓN DE SUBIDA

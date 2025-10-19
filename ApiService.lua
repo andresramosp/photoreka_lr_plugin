@@ -371,14 +371,14 @@ function ApiService.uploadPhotos(photoData, progressCallback, onlyToLightbox)
             log:info(string.format("PROCESANDO FOTO %d de %d", i, totalPhotos))
             log:info("========================================")
             
-            -- Preparar datos
+            -- Obtener EXIF data (ya extraída en Main.lua)
             local exifData = exifDataList[i]
             if not exifData then
-                log:warn("No EXIF data para foto " .. tostring(i) .. ", usando mock")
-                local ExifService = require 'ExifService'
-                exifData = ExifService.getMockExifData()
+                log:error("CRITICAL: No EXIF data para foto " .. tostring(i))
+                error("Missing EXIF data for photo " .. tostring(i))
             end
             
+            -- Obtener source data
             local sourceData = sourceDataList[i]
             if not sourceData then
                 log:warn("No source data para foto " .. tostring(i) .. ", usando default")

@@ -234,16 +234,11 @@ LrFunctionContext.callWithContext('showDialog', function(context)
                     }
                     table.insert(sourceDataList, sourceData)
                     
+                    -- Extraer EXIF reales de la foto
                     local exifData
-                    if Config.USE_MOCK_EXIF then
-                        -- Usar EXIF inventados para pruebas
-                        exifData = ExifService.getMockExifData()
-                    else
-                        -- Extraer EXIF reales
-                        catalog:withReadAccessDo(function()
-                            exifData = ExifService.extractExifData(photo)
-                        end)
-                    end
+                    catalog:withReadAccessDo(function()
+                        exifData = ExifService.extractExifData(photo)
+                    end)
                     table.insert(exifDataList, exifData)
                 end
                 
