@@ -111,17 +111,7 @@ LrFunctionContext.callWithContext('showDialog', function(context)
         bind_to_object = props,
         spacing = f:control_spacing(),
         
-        -- Logo pequeño
-        f:row {
-            fill_horizontal = 1,
-            
-            f:picture {
-                value = _PLUGIN.path .. '/logo_full.png',
-                height = 100,
-            },
-        },
-        
-        f:spacer { height = 10 },
+
         
         -- Header con título y botón de cuenta
         f:row {
@@ -131,7 +121,7 @@ LrFunctionContext.callWithContext('showDialog', function(context)
                 title = LrView.bind {
                     key = 'photoCount',
                     transform = function(value)
-                        return string.format('Fotos seleccionadas: %d', value)
+                        return string.format('Selected photos: %d', value)
                     end
                 },
                 font = '<system/bold>',
@@ -171,8 +161,8 @@ LrFunctionContext.callWithContext('showDialog', function(context)
     local result = LrDialogs.presentModalDialog({
         title = 'Export to Photoreka',
         contents = dialogContent,
-        actionVerb = 'Procesar',
-        cancelVerb = 'Cancelar',
+        actionVerb = 'Export',
+        cancelVerb = 'Cancel',
     })
     
     -- Si el usuario hace clic en "Procesar"
@@ -402,7 +392,7 @@ LrFunctionContext.callWithContext('showDialog', function(context)
             LrDialogs.presentModalDialog({
                 title = 'Export to Photoreka',
                 contents = dialogResult,
-                actionVerb = 'Cerrar',
+                actionVerb = 'Close',
             })
             
             -- Limpiar carpeta temporal después de mostrar el diálogo

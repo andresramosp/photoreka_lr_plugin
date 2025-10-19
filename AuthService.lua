@@ -209,16 +209,16 @@ function AuthService.showLoginDialog()
                 
                 f:picture {
                     value = _PLUGIN.path .. '/logo_full.png',
-                    height = 100
+                    height = 80
                 },
                 
                 f:spacer { fill_horizontal = 1 },
             },
             
-            f:spacer { height = 8 },
+            f:spacer { height = 2 },
             
             f:static_text {
-                title = 'Iniciar sesión en Photoreka',
+                title = 'Sign in to Photoreka',
                 font = '<system/bold>',
             },
             
@@ -314,8 +314,8 @@ function AuthService.showLoginDialog()
         local result = LrDialogs.presentModalDialog({
             title = 'Photoreka Login',
             contents = dialogContent,
-            actionVerb = 'Iniciar sesión',
-            cancelVerb = 'Cancelar',
+            actionVerb = 'Login',
+            cancelVerb = 'Cancel',
             save_frame = 'loginDialog',
             actionBinding = {
                 enabled = LrView.bind {
@@ -402,8 +402,8 @@ function AuthService.showAccountDialog()
         
         if not userInfo then
             LrDialogs.message(
-                'No hay sesión activa',
-                'No hay ningún usuario autenticado.',
+                'No active session',
+                'There is no authenticated user.',
                 'info'
             )
             return false
@@ -427,7 +427,7 @@ function AuthService.showAccountDialog()
             f:spacer { height = 10 },
             
             f:static_text {
-                title = 'Cuenta de Photoreka',
+                title = 'Photoreka Account',
                 font = '<system/bold>',
             },
             
@@ -439,7 +439,7 @@ function AuthService.showAccountDialog()
                 spacing = f:label_spacing(),
                 
                 f:static_text {
-                    title = 'Usuario:',
+                    title = 'User:',
                     alignment = 'right',
                     width = 80,
                 },
@@ -464,27 +464,22 @@ function AuthService.showAccountDialog()
                 },
             },
             
-            f:spacer { height = 20 },
-            
-            f:static_text {
-                title = '¿Deseas cerrar sesión?',
-                font = '<system/small>',
-            },
+
         }
         
         local result = LrDialogs.presentModalDialog({
-            title = 'Cuenta',
+            title = 'Account',
             contents = dialogContent,
-            actionVerb = 'Cerrar sesión',
-            cancelVerb = 'Cancelar',
+            actionVerb = 'Logout',
+            cancelVerb = 'Cancel',
         })
         
         if result == 'ok' then
             AuthService.logout()
             LrDialogs.message(
-                'Sesión cerrada',
-                'Has cerrado sesión correctamente.',
-                'info'
+                 'Session closed',
+                 'You have successfully logged out.',
+                 'info'
             )
             return true
         end
