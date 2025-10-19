@@ -13,6 +13,13 @@ function ExportService.createTempFolder()
     return exportFolder
 end
 
+-- Elimina una carpeta y todo su contenido de forma recursiva
+function ExportService.deleteTempFolder(folderPath)
+    if folderPath and LrFileUtils.exists(folderPath) then
+        LrFileUtils.delete(folderPath)
+    end
+end
+
 -- Configuración de exportación predeterminada
 function ExportService.getExportSettings(exportFolder)
     return {
@@ -71,7 +78,7 @@ function ExportService.exportPhotos(photos, exportFolder, progressCallback)
             progressCallback(
                 currentPhoto,
                 totalPhotos * 2, -- Total incluye ambas versiones
-                string.format('Exportando versión full %d de %d...', currentPhoto, totalPhotos)
+                string.format('Exporting photo %d de %d...', currentPhoto, totalPhotos)
             )
         end
         
@@ -111,7 +118,7 @@ function ExportService.exportPhotos(photos, exportFolder, progressCallback)
             progressCallback(
                 currentPhoto,
                 totalPhotos * 2, -- Total incluye ambas versiones
-                string.format('Exportando thumbnail %d de %d...', currentPhoto - totalPhotos, totalPhotos)
+                string.format('Exporting thumbnail %d de %d...', currentPhoto - totalPhotos, totalPhotos)
             )
         end
         

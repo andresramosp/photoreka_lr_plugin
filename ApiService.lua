@@ -290,11 +290,11 @@ local function processWithConcurrencyLimit(tasks, limit, progressCallback, total
                 progressCallback(
                     completed,
                     totalPhotos,
-                    string.format('Subiendo foto %d de %d...', completed, totalPhotos)
+                    string.format('Synchronizing photo %d de %d...', completed, totalPhotos)
                 )
             end
             
-            log:info(string.format("Tarea %d completada (%d/%d)", taskIndex, completed, totalTasks))
+            log:info(string.format("Task %d completed (%d/%d)", taskIndex, completed, totalTasks))
             
             -- Marcar esta tarea como completada
             for i, t in ipairs(activeTasks) do

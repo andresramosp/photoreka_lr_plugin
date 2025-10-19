@@ -195,12 +195,12 @@ LrFunctionContext.callWithContext('showDialog', function(context)
             LrFunctionContext.callWithContext('exportPhotos', function(exportContext)
                 -- Mostrar barra de progreso
                 local progressScope = LrDialogs.showModalProgressDialog({
-                    title = 'Procesando y enviando fotos...',
+                    title = 'Submitting photos to Photoreka server...',
                     functionContext = exportContext,
                 })
                 
                 -- FASE 1: Exportación (40% del progreso total)
-                progressScope:setCaption('Fase 1/3: Exportando fotos (full + thumbs)...')
+                progressScope:setCaption('Step 1/3: Exporting photos...')
                 
                 local exportedData = ExportService.exportPhotos(
                     photos,
@@ -209,12 +209,12 @@ LrFunctionContext.callWithContext('showDialog', function(context)
                         -- 0-40% del progreso total
                         local progress = (current / total) * 0.4
                         progressScope:setPortionComplete(progress, 1)
-                        progressScope:setCaption('Fase 1/3: ' .. caption)
+                        progressScope:setCaption('Step 1/3: ' .. caption)
                     end
                 )
                 
                 -- FASE 2: Extracción de EXIF (10% del progreso total)
-                progressScope:setCaption('Fase 2/3: Extrayendo metadatos EXIF...')
+                progressScope:setCaption('Step 2/3: Extracting EXIF data...')
                 
                 local exifDataList = {}
                 local sourceDataList = {}
@@ -248,7 +248,7 @@ LrFunctionContext.callWithContext('showDialog', function(context)
                 end
                 
                 -- FASE 3: Envío a la API (50% restante)
-                progressScope:setCaption('Fase 3/3: Enviando fotos a Photoreka...')
+                progressScope:setCaption('Step 3/3: Submitting photos to Photoreka server...')
                 
                 exportedData.exifDataList = exifDataList
                 exportedData.sourceDataList = sourceDataList
@@ -259,7 +259,7 @@ LrFunctionContext.callWithContext('showDialog', function(context)
                         -- 50-100% del progreso total
                         local progress = 0.5 + (current / total) * 0.5
                         progressScope:setPortionComplete(progress, 1)
-                        progressScope:setCaption('Fase 3/3: ' .. caption)
+                        progressScope:setCaption('Step 3/3: ' .. caption)
                     end,
                     onlyToLightbox  -- Pasar el parámetro onlyToLightbox
                 )
@@ -381,6 +381,11 @@ LrFunctionContext.callWithContext('showDialog', function(context)
                 contents = dialogResult,
                 actionVerb = 'Cerrar',
             })
+            
+            -- Limpiar carpeta temporal después de mostrar el diálogo
+            log:info("Eliminando carpeta temporal: " .. exportFolder)
+            ExportService.deleteTempFolder(exportFolder)
+            log:info("Carpeta temporal eliminada correctamente")
         end)
     end
     
