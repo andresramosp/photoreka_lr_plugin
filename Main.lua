@@ -74,72 +74,33 @@ LrFunctionContext.callWithContext('showDialog', function(context)
     -- Crear propiedades observables para el checkbox
     local props = LrBinding.makePropertyTable(context)
     props.onlyToLightbox = false
-    
-    -- Lista de fotos que se puede modificar - usando tabla con índices
-    local photosToProcess = {}
-    for i, photo in ipairs(photos) do
-        photosToProcess[i] = {
-            photo = photo,
-            removed = false
-        }
-    end
-    
-    -- Contador de fotos activas
-    local function countActivePhotos()
-        local count = 0
-        for _, item in ipairs(photosToProcess) do
-            if not item.removed then
-                count = count + 1
-            end
-        end
-        return count
-    end
+    props.photoCount = #photos
     
     -- Construir el grid con miniaturas
     local thumbnailRows = {}
     local photosPerRow = 4
     local currentRow = {}
     
-    for i, photoItem in ipairs(photosToProcess) do
-        -- Crear propiedad observable para visibilidad
-        props['photo_' .. i .. '_visible'] = true
-        
-        -- Cada miniatura con su botón de eliminar
+    for i, photo in ipairs(photos) do
+        -- Cada miniatura
         local thumbnailItem = f:column {
             spacing = f:label_spacing(),
-            visible = LrView.bind('photo_' .. i .. '_visible'),
             
             f:catalog_photo {
-                photo = photoItem.photo,
+                photo = photo,
                 width = 150,
                 height = 150,
-            },
-            
-            f:push_button {
-                title = '🗑️ Remove',
-                font = '<system/small>',
-                action = function()
-                    -- Marcar como eliminada
-                    photosToProcess[i].removed = true
-                    props['photo_' .. i .. '_visible'] = false
-                    
-                    -- Actualizar el contador
-                    props.photoCount = countActivePhotos()
-                end,
             },
         }
         
         table.insert(currentRow, thumbnailItem)
         
         -- Si completamos una fila o es la última foto
-        if #currentRow == photosPerRow or i == #photosToProcess then
+        if #currentRow == photosPerRow or i == #photos then
             table.insert(thumbnailRows, f:row(currentRow))
             currentRow = {}
         end
     end
-    
-    -- Inicializar el contador
-    props.photoCount = countActivePhotos()
     
     -- Obtener información del usuario autenticado (si existe)
     local userInfo = AuthService.getStoredUserInfo()
@@ -188,7 +149,7 @@ LrFunctionContext.callWithContext('showDialog', function(context)
         
         -- Checkbox para modo "Only to Lightbox"
         f:checkbox {
-            title = 'Only to Lightbox (check for reviewing duplicates)',
+            title = 'Only to Lightbox (check for filtering or reviewing duplicates)',
             value = LrView.bind('onlyToLightbox'),
         },
 
@@ -204,20 +165,6 @@ LrFunctionContext.callWithContext('showDialog', function(context)
     
     -- Si el usuario hace clic en "Procesar"
     if result == 'ok' then
-        -- Construir lista de fotos no eliminadas
-        local finalPhotosToProcess = {}
-        for _, item in ipairs(photosToProcess) do
-            if not item.removed then
-                table.insert(finalPhotosToProcess, item.photo)
-            end
-        end
-        
-        -- Verificar que aún hay fotos para procesar
-        if #finalPhotosToProcess == 0 then
-            LrDialogs.message('Export to Photoreka', 'No hay fotos para procesar.', 'info')
-            return
-        end
-        
         -- Capturar el valor del checkbox antes de salir del contexto
         local onlyToLightbox = props.onlyToLightbox
         
@@ -256,7 +203,7 @@ LrFunctionContext.callWithContext('showDialog', function(context)
                 progressScope:setCaption('Fase 1/3: Exportando fotos (full + thumbs)...')
                 
                 local exportedData = ExportService.exportPhotos(
-                    finalPhotosToProcess,
+                    photos,
                     exportFolder,
                     function(current, total, caption)
                         -- 0-40% del progreso total
@@ -271,8 +218,8 @@ LrFunctionContext.callWithContext('showDialog', function(context)
                 
                 local exifDataList = {}
                 local sourceDataList = {}
-                for i, photo in ipairs(finalPhotosToProcess) do
-                    local progress = 0.4 + (i / #finalPhotosToProcess) * 0.1
+                for i, photo in ipairs(photos) do
+                    local progress = 0.4 + (i / #photos) * 0.1
                     progressScope:setPortionComplete(progress, 1)
                     
                     -- Extraer uniqueId de Lightroom
