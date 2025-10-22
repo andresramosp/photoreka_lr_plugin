@@ -114,7 +114,7 @@ LrFunctionContext.callWithContext('showDialog', function(context)
     -- Validar que haya fotos seleccionadas explícitamente
     if not hasSelection or not photos or #photos == 0 then
         LrDialogs.message(
-            'Export to Photoreka', 
+            'Analyze Photos', 
             'Please select photos before exporting.', 
             'info'
         )
@@ -124,7 +124,7 @@ LrFunctionContext.callWithContext('showDialog', function(context)
     -- Validar que no se exceda el máximo de fotos
     if #photos > Config.MAX_PHOTOS then
         LrDialogs.message(
-            'Export to Photoreka', 
+            'Analyze Photos', 
             string.format('You can only process up to %d photos at a time. You have selected %d photos.', Config.MAX_PHOTOS, #photos), 
             'warning'
         )
@@ -222,7 +222,7 @@ LrFunctionContext.callWithContext('showDialog', function(context)
     
     -- Mostrar el diálogo con botón "Procesar"
     local result = LrDialogs.presentModalDialog({
-        title = 'Export to Photoreka',
+        title = 'Analyze Photos',
         contents = dialogContent,
         actionVerb = 'Export',
         cancelVerb = 'Cancel',
@@ -242,7 +242,7 @@ LrFunctionContext.callWithContext('showDialog', function(context)
             if not token or token == '' then
                 log:info("Autenticación cancelada o falló, abortando proceso")
                 LrDialogs.message(
-                    'Export to Photoreka',
+                    'Analyze Photos',
                     'Process cancelled. You must log in to continue.',
                     'info'
                 )
@@ -453,7 +453,7 @@ LrFunctionContext.callWithContext('showDialog', function(context)
             local dialogResult = f:column(dialogComponents)
             
             LrDialogs.presentModalDialog({
-                title = 'Export to Photoreka',
+                title = 'Analyze Photos',
                 contents = dialogResult,
                 actionVerb = 'Close',
             })

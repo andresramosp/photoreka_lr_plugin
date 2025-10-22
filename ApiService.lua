@@ -459,4 +459,65 @@ function ApiService.uploadPhotos(photoData, progressCallback, onlyToLightbox)
     }
 end
 
+-- Realiza una búsqueda semántica en el catálogo de Photoreka
+-- Parámetros:
+--   query: texto de búsqueda del usuario
+--   options: tabla opcional con configuración de búsqueda
+-- Retorna: tabla con resultados de búsqueda
+function ApiService.search(query, options)
+    local token = getAuthToken()
+    
+    -- Opciones por defecto
+    local searchOptions = options or {
+        iteration = 1,
+        pageSize = 100,
+        searchMode = "low_precision",
+        collections = {},
+        visualAspects = {},
+        artisticScores = {},
+        cursor = nil,
+        source = 'lightroom'
+    }
+    
+    local url = Config.API_BASE_URL .. "/api/search/semantic/sync"
+    
+    local payload = {
+        description = query,
+        options = searchOptions
+    }
+    
+    log:info("Realizando búsqueda semántica: " .. query)
+    log:info("URL: " .. url)
+    
+    local headers = {
+        { field = "Authorization", value = "Bearer " .. token },
+        { field = "Content-Type", value = "application/json" }
+    }
+    
+    local body = JSON.encode(payload)
+    local response, responseHeaders = LrHttp.post(url, body, headers)
+    
+    if not response then
+        log:error("ERROR: No response from search API")
+        error("Failed to get search results from server")
+    end
+    
+    -- Verificar código de estado
+    if responseHeaders and responseHeaders.status then
+        local statusCode = tonumber(responseHeaders.status)
+        log:info("Search API status code: " .. tostring(statusCode))
+        
+        if statusCode and (statusCode < 200 or statusCode >= 300) then
+            log:error("Search API error " .. tostring(statusCode) .. ": " .. tostring(response))
+            error(string.format("Search API returned error %d: %s", statusCode, response or "unknown error"))
+        end
+    end
+    
+    log:info("Decodificando resultados de búsqueda...")
+    local searchResults = JSON.decode(response)
+    log:info("Resultados obtenidos: " .. tostring(#(searchResults.results or {})) .. " fotos")
+    
+    return searchResults
+end
+
 return ApiService

@@ -10,16 +10,32 @@ return {
     -- Agrega un ítem de menú en Biblioteca > Extras del módulo
     LrLibraryMenuItems = {
         {
-            title = "Export to Photoreka",
+            title = "Analyze Photos",
             file = "Main.lua",
+        },
+        {
+            title = "Search",
+            file = "Search.lua",
         },
     },
 
     -- Agrega el mismo ítem en Archivo > Extras del módulo (accesible desde cualquier módulo)
     LrExportMenuItems = {
         {
-            title = "Export to Photoreka",
+            title = "Analyze Photos",
             file = "Main.lua",
+        },
+        {
+            title = "Search",
+            file = "Search.lua",
+        },
+        {
+            title = "Canvas",
+            file = "OpenCanvas.lua",
+        },
+        {
+            title = "3D Atlas",
+            file = "Open3DAtlas.lua",
         },
     },
 }
