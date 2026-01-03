@@ -462,16 +462,19 @@ end
 -- Realiza una búsqueda semántica en el catálogo de Photoreka
 -- Parámetros:
 --   query: texto de búsqueda del usuario
---   options: tabla opcional con configuración de búsqueda
+--   searchMode: modo de búsqueda ("broad", "adaptive", "precise") - opcional, por defecto "adaptive"
 -- Retorna: tabla con resultados de búsqueda
-function ApiService.search(query, options)
+function ApiService.search(query, searchMode)
     local token = getAuthToken()
     
-    -- Opciones por defecto
-    local searchOptions = options or {
+    -- Usar searchMode recibido o "adaptive" por defecto
+    searchMode = searchMode or "adaptive"
+    
+    -- Opciones de búsqueda
+    local searchOptions = {
         iteration = 1,
         pageSize = 100,
-        searchMode = "adaptive",
+        searchMode = searchMode,
         collections = {},
         visualAspects = {},
         artisticScores = {},

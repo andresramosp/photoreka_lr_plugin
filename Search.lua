@@ -119,7 +119,8 @@ LrFunctionContext.callWithContext('showSearchDialog', function(context)
     local props = LrBinding.makePropertyTable(context)
     props.searchQuery = ""
     props.isSearching = false
-    props.precisionLevel = 2  -- Por defecto: relaxed (1=relaxed, 2=fair, 3=strict)
+    -- props.precisionLevel = 2  -- Por defecto: relaxed (1=relaxed, 2=fair, 3=strict)
+    props.searchMode = "adaptive"  -- Por defecto: adaptive (opciones: broad, adaptive, precise)
     
     -- Obtener información del usuario autenticado
     local userInfo = AuthService.getStoredUserInfo()
@@ -187,6 +188,7 @@ LrFunctionContext.callWithContext('showSearchDialog', function(context)
         
         f:spacer { height = 15 },
         
+        --[[ SLIDER DE PRECISIÓN (COMENTADO - Reemplazado por radio buttons)
         -- Slider de precisión
         f:row {
             fill_horizontal = 1,
@@ -224,6 +226,36 @@ LrFunctionContext.callWithContext('showSearchDialog', function(context)
                 width = 80,
             },
         },
+        --]]
+        
+        -- Radio buttons para Search Mode
+        f:row {
+            fill_horizontal = 1,
+            spacing = f:control_spacing(),
+            
+            f:static_text {
+                title = 'Mode:',
+                width = 80,
+            },
+            
+            f:radio_button {
+                title = 'Fast',
+                value = LrView.bind('searchMode'),
+                checked_value = 'broad',
+            },
+            
+            f:radio_button {
+                title = 'Adaptive',
+                value = LrView.bind('searchMode'),
+                checked_value = 'adaptive',
+            },
+            
+            f:radio_button {
+                title = 'Precise',
+                value = LrView.bind('searchMode'),
+                checked_value = 'precise',
+            },
+        },
     }
     
     -- Mostrar el diálogo
@@ -232,7 +264,7 @@ LrFunctionContext.callWithContext('showSearchDialog', function(context)
         contents = dialogContent,
         actionVerb = 'Search',
         cancelVerb = 'Cancel',
-        otherVerb = '🌐 Advanced search',
+        otherVerb = '🌐 Photoreka Search',
     })
     
     -- Si el usuario hace clic en "Advanced search"
@@ -244,7 +276,8 @@ LrFunctionContext.callWithContext('showSearchDialog', function(context)
     -- Si el usuario hace clic en "Search"
     if result == 'ok' then
         local searchQuery = props.searchQuery
-        local precisionLevel = props.precisionLevel
+        -- local precisionLevel = props.precisionLevel  -- COMENTADO: Reemplazado por searchMode
+        local searchMode = props.searchMode
         
         -- Validar que no esté vacío
         if not searchQuery or searchQuery == "" then
@@ -283,9 +316,9 @@ LrFunctionContext.callWithContext('showSearchDialog', function(context)
                     functionContext = searchContext,
                 })
                 
-                -- Llamar a la API de búsqueda
+                -- Llamar a la API de búsqueda con searchMode
                 local success, result = LrTasks.pcall(function()
-                    return ApiService.search(searchQuery)
+                    return ApiService.search(searchQuery, searchMode)
                 end)
                 
                 progressScope:done()
@@ -366,6 +399,7 @@ LrFunctionContext.callWithContext('showSearchDialog', function(context)
                 -- Obtener labelScore para filtrado
                 local labelScore = photoResult.photo and photoResult.photo.labelScore
                 
+                --[[ FILTRADO POR PRECISIÓN (COMENTADO - Ahora siempre usa relaxed)
                 -- Filtrar según el nivel de precisión
                 local shouldInclude = false
                 if labelScore then
@@ -379,6 +413,16 @@ LrFunctionContext.callWithContext('showSearchDialog', function(context)
                         -- Broad: todo menos poor
                         shouldInclude = (labelScore ~= "poor")
                     end
+                else
+                    -- Si no tiene labelScore, incluir por defecto
+                    shouldInclude = true
+                end
+                --]]
+                
+                -- Filtrado siempre en modo relaxed (todo menos poor)
+                local shouldInclude = false
+                if labelScore then
+                    shouldInclude = (labelScore ~= "poor")
                 else
                     -- Si no tiene labelScore, incluir por defecto
                     shouldInclude = true
@@ -491,7 +535,16 @@ LrFunctionContext.callWithContext('showSearchDialog', function(context)
             end
             
             -- Crear colección con los resultados (el orden ya se aplica dentro)
-            local collectionName = "Photoreka Search: " .. searchQuery
+            -- Mapear searchMode a nombre legible
+            local searchModeLabel = searchMode
+            if searchMode == "broad" then
+                searchModeLabel = "Fast"
+            elseif searchMode == "adaptive" then
+                searchModeLabel = "Adaptive"
+            elseif searchMode == "precise" then
+                searchModeLabel = "Precise"
+            end
+            local collectionName = "Photoreka Search - " .. searchModeLabel .. ": " .. searchQuery
             
             -- Desactivar la colección si ya está activa (para evitar problemas al limpiarla)
             catalog:withWriteAccessDo("Deactivate collection", function()
