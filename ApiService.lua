@@ -471,7 +471,7 @@ function ApiService.search(query, options)
     local searchOptions = options or {
         iteration = 1,
         pageSize = 100,
-        searchMode = "broad",
+        searchMode = "adaptive",
         collections = {},
         visualAspects = {},
         artisticScores = {},

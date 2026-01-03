@@ -6,6 +6,7 @@ local LrView = import 'LrView'
 local LrBinding = import 'LrBinding'
 local LrFunctionContext = import 'LrFunctionContext'
 local LrLogger = import 'LrLogger'
+local LrHttp = import 'LrHttp'
 
 -- Configurar logger
 local log = LrLogger('PhotorekaPlugin')
@@ -21,22 +22,42 @@ log:info("========================================")
 log:info("SEARCH.LUA EJECUTÁNDOSE")
 log:info("========================================")
 
+-- Función para mapear labelScore a Rating (0-3 estrellas)
+local function scoreToRating(labelScore)
+    if labelScore == "excellent" then return 3
+    elseif labelScore == "good" then return 2
+    elseif labelScore == "fair" then return 1
+    elseif labelScore == "poor" then return 0
+    else return 0 end
+end
+
+-- Función para mapear labelScore a Label (color)
+local function labelScoreToColor(labelScore)
+    if labelScore == "excellent" then return "green"
+    elseif labelScore == "good" then return "yellow"
+    elseif labelScore == "fair" then return "blue"
+    elseif labelScore == "poor" then return "red"
+    else return nil end
+end
+
 -- Función para crear o actualizar una colección con los resultados
 -- Parámetros:
 --   catalog: catálogo de Lightroom
 --   collectionName: nombre de la colección
 --   photos: array de fotos a añadir (ya ordenado por relevancia)
+--   searchData: array con información de scores para cada foto
 -- Retorna: la colección creada/actualizada
-local function createOrUpdateCollection(catalog, collectionName, photos)
+local function createOrUpdateCollection(catalog, collectionName, photos, searchData)
     local collection = nil
     
     catalog:withWriteAccessDo("Create Search Results Collection", function()
         -- Buscar si ya existe la colección
         local collections = catalog:getChildCollections()
+        
         for _, coll in ipairs(collections) do
             if coll:getName() == collectionName then
                 collection = coll
-                log:info("Colección encontrada: " .. collectionName)
+                log:info("Colección existente encontrada: " .. collectionName)
                 break
             end
         end
@@ -44,21 +65,43 @@ local function createOrUpdateCollection(catalog, collectionName, photos)
         -- Si no existe, crearla
         if not collection then
             collection = catalog:createCollection(collectionName)
-            log:info("Colección creada: " .. collectionName)
+            log:info("Nueva colección creada: " .. collectionName)
+        else
+            -- Limpiar la colección existente
+            log:info("Limpiando colección existente...")
+            collection:removeAllPhotos()
+            log:info("Colección limpiada")
         end
-        
-        -- Limpiar la colección (remover fotos anteriores)
-        collection:removeAllPhotos()
-        log:info("Colección limpiada")
         
         -- Añadir las nuevas fotos
         if #photos > 0 then
             collection:addPhotos(photos)
             log:info(tostring(#photos) .. " fotos añadidas a la colección")
             
-            -- TODO: Ordenamiento deshabilitado temporalmente para debug
-            -- collection:setPhotoOrder(photos)
-            -- log:info("Orden personalizado aplicado a la colección (por relevancia)")
+            -- Aplicar Rating y Label basados en scores de búsqueda
+            for i, photo in ipairs(photos) do
+                -- Buscar el searchData correspondiente a esta foto
+                local photoData = searchData[i]
+                if photoData and photoData.apiPhoto then
+                    local labelScore = photoData.apiPhoto.labelScore
+                    
+                    -- Aplicar Rating basado en labelScore (0-3 estrellas)
+                    local rating = scoreToRating(labelScore)
+                    photo:setRawMetadata("rating", rating)
+                    
+                    -- Aplicar Label basado en labelScore
+                    local colorLabel = labelScoreToColor(labelScore)
+                    if colorLabel then
+                        photo:setRawMetadata("colorNameForLabel", colorLabel)
+                    end
+                    
+                    log:info(string.format("Foto %d: Rating=%d, Label=%s (totalScore=%.3f, labelScore=%s)", 
+                        i, rating, colorLabel or "none", 
+                        photoData.totalScore or 0, labelScore or "none"))
+                end
+            end
+            
+            log:info("Ratings y Labels aplicados según relevancia")
         end
     end)
     
@@ -76,7 +119,7 @@ LrFunctionContext.callWithContext('showSearchDialog', function(context)
     local props = LrBinding.makePropertyTable(context)
     props.searchQuery = ""
     props.isSearching = false
-    props.precisionLevel = 2  -- Por defecto: flexible (1=strict, 2=flexible, 3=broad)
+    props.precisionLevel = 2  -- Por defecto: relaxed (1=relaxed, 2=fair, 3=strict)
     
     -- Obtener información del usuario autenticado
     local userInfo = AuthService.getStoredUserInfo()
@@ -158,6 +201,7 @@ LrFunctionContext.callWithContext('showSearchDialog', function(context)
                 min = 1,
                 max = 3,
                 integral = true,
+                value_step = 1,
                 width = 200,
             },
             
@@ -168,15 +212,16 @@ LrFunctionContext.callWithContext('showSearchDialog', function(context)
                     key = 'precisionLevel',
                     transform = function(value)
                         if value == 1 then
-                            return 'Strict (excellent only)'
+                            return 'Relaxed'
                         elseif value == 2 then
-                            return 'Flexible (excellent + good)'
-                        else
-                            return 'Broad (all except poor)'
+                            return 'Fair'
+                        elseif value == 3 then
+                            return 'Strict'
                         end
                     end
                 },
                 font = '<system/small>',
+                width = 80,
             },
         },
     }
@@ -187,7 +232,14 @@ LrFunctionContext.callWithContext('showSearchDialog', function(context)
         contents = dialogContent,
         actionVerb = 'Search',
         cancelVerb = 'Cancel',
+        otherVerb = '🌐 Advanced search',
     })
+    
+    -- Si el usuario hace clic en "Advanced search"
+    if result == 'other' then
+        LrHttp.openUrlInBrowser('https://www.photoreka.com/search')
+        return
+    end
     
     -- Si el usuario hace clic en "Search"
     if result == 'ok' then
@@ -256,11 +308,11 @@ LrFunctionContext.callWithContext('showSearchDialog', function(context)
             end
             
             log:info("========== SEARCH RESULTS DEBUG ==========")
-            log:info("RAW API RESPONSE:")
-            log:info(require('JSON').encode(searchResults))
-            log:info("==========================================")
-            log:info("Type: " .. tostring(searchResults.type))
-            log:info("Has data: " .. tostring(searchResults.data ~= nil))
+            -- log:info("RAW API RESPONSE:")
+            -- log:info(require('JSON').encode(searchResults))
+            -- log:info("==========================================")
+            -- log:info("Type: " .. tostring(searchResults.type))
+            -- log:info("Has data: " .. tostring(searchResults.data ~= nil))
             
             -- Acceder a data.results (la API devuelve {type, data: {hasMore, results}})
             local data = searchResults.data
@@ -317,13 +369,13 @@ LrFunctionContext.callWithContext('showSearchDialog', function(context)
                 -- Filtrar según el nivel de precisión
                 local shouldInclude = false
                 if labelScore then
-                    if precisionLevel == 1 then
+                    if precisionLevel == 3 then
                         -- Strict: solo excellent
                         shouldInclude = (labelScore == "excellent")
                     elseif precisionLevel == 2 then
                         -- Flexible: excellent + good
                         shouldInclude = (labelScore == "excellent" or labelScore == "good")
-                    else
+                    elseif precisionLevel == 1 then
                         -- Broad: todo menos poor
                         shouldInclude = (labelScore ~= "poor")
                     end
@@ -385,11 +437,10 @@ LrFunctionContext.callWithContext('showSearchDialog', function(context)
             end
             
             -- Ordenar por totalScore (mayor a menor) para que las fotos más relevantes aparezcan primero
-            -- TODO: Ordenamiento deshabilitado temporalmente para debug
-            -- table.sort(searchData, function(a, b)
-            --     return (a.totalScore or 0) > (b.totalScore or 0)
-            -- end)
-            -- log:info("Resultados ordenados por totalScore (relevancia)")
+            table.sort(searchData, function(a, b)
+                return (a.totalScore or 0) > (b.totalScore or 0)
+            end)
+            log:info("Resultados ordenados por totalScore (relevancia)")
             
             -- Buscar fotos en Lightroom usando el nuevo servicio de matcheo
             -- NOTA: Esto puede tardar 60+ segundos en catálogos grandes (construye caché)
@@ -441,7 +492,22 @@ LrFunctionContext.callWithContext('showSearchDialog', function(context)
             
             -- Crear colección con los resultados (el orden ya se aplica dentro)
             local collectionName = "Photoreka Search: " .. searchQuery
-            local collection = createOrUpdateCollection(catalog, collectionName, foundPhotos)
+            
+            -- Desactivar la colección si ya está activa (para evitar problemas al limpiarla)
+            catalog:withWriteAccessDo("Deactivate collection", function()
+                local activeSources = catalog:getActiveSources()
+                if activeSources and #activeSources > 0 then
+                    for _, source in ipairs(activeSources) do
+                        if source.getName and source:getName() == collectionName then
+                            catalog:setActiveSources({})
+                            log:info("Colección desactivada antes de actualizar")
+                            break
+                        end
+                    end
+                end
+            end)
+            
+            local collection = createOrUpdateCollection(catalog, collectionName, foundPhotos, searchData)
             
             -- Abrir la colección automáticamente
             if collection then
@@ -449,10 +515,10 @@ LrFunctionContext.callWithContext('showSearchDialog', function(context)
                 log:info("Colección activada en el catálogo")
             end
             
-            -- Mostrar mensaje de éxito
+            -- Mostrar mensaje de éxito con recomendación de ordenación
             LrDialogs.message(
                 'Photoreka Search',
-                string.format('Found %d photos matching "%s".\n\nResults saved to collection:\n"%s"', 
+                string.format('Found %d photos matching "%s".\n\nResults saved to collection:\n"%s"\n\n💡 TIP: Sort by \'Custom Order\' to see results ordered by relevance.', 
                     #foundPhotos, 
                     searchQuery, 
                     collectionName
