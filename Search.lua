@@ -25,7 +25,7 @@ log:info("========================================")
 -- Parámetros:
 --   catalog: catálogo de Lightroom
 --   collectionName: nombre de la colección
---   photos: array de fotos a añadir
+--   photos: array de fotos a añadir (ya ordenado por relevancia)
 -- Retorna: la colección creada/actualizada
 local function createOrUpdateCollection(catalog, collectionName, photos)
     local collection = nil
@@ -55,6 +55,10 @@ local function createOrUpdateCollection(catalog, collectionName, photos)
         if #photos > 0 then
             collection:addPhotos(photos)
             log:info(tostring(#photos) .. " fotos añadidas a la colección")
+            
+            -- TODO: Ordenamiento deshabilitado temporalmente para debug
+            -- collection:setPhotoOrder(photos)
+            -- log:info("Orden personalizado aplicado a la colección (por relevancia)")
         end
     end)
     
@@ -331,19 +335,6 @@ LrFunctionContext.callWithContext('showSearchDialog', function(context)
                 -- Solo procesar si pasa el filtro
                 if shouldInclude then
                 
-                -- DEBUG: Imprimir estructura del photo
-                log:info("========== FOTO " .. tostring(i) .. " ==========")
-                if photoResult.photo then
-                    log:info("photoResult.photo existe")
-                    log:info("Keys en photoResult.photo:")
-                    for key, value in pairs(photoResult.photo) do
-                        log:info("  - " .. tostring(key) .. " (" .. type(value) .. ")")
-                    end
-                else
-                    log:info("photoResult.photo es nil!")
-                end
-                log:info("=========================================")
-                
                 -- Obtener originalFileName del objeto photo
                 if photoResult.photo and photoResult.photo.originalFileName then
                     fileName = photoResult.photo.originalFileName
@@ -351,47 +342,34 @@ LrFunctionContext.callWithContext('showSearchDialog', function(context)
                 
                 -- Extraer uniqueId de descriptions
                 if photoResult.photo and photoResult.photo.descriptions then
-                    log:info("Foto " .. tostring(i) .. " tiene descriptions (objeto)")
-                    
                     local descriptions = photoResult.photo.descriptions
                     
                     -- Acceder directamente a source
                     if descriptions.source then
-                        log:info("  - source.type: " .. tostring(descriptions.source.type))
-                        log:info("  - source.uniqueId: " .. tostring(descriptions.source.uniqueId))
-                        
                         if descriptions.source.type == "lightroom" and descriptions.source.uniqueId then
                             uniqueId = descriptions.source.uniqueId
-                            log:info("  ✓ uniqueId capturado: " .. tostring(uniqueId))
                         end
-                    else
-                        log:info("  - NO tiene source")
                     end
-                else
-                    log:info("Foto " .. tostring(i) .. " NO tiene descriptions")
                 end
-                
-                -- Log combinado con fileName, uniqueId y labelScore
-                log:info(string.format("Foto %d FINAL - fileName: %s, uniqueId: %s, labelScore: %s", 
-                    i, 
-                    tostring(fileName), 
-                    tostring(uniqueId),
-                    tostring(labelScore)
-                ))
                 
                 -- Añadir a searchData si tenemos al menos uno de los dos
                 if uniqueId or fileName then
+                    -- Capturar totalScore para ordenamiento
+                    local totalScore = photoResult.photo and photoResult.photo.totalScore or 0
+                    
                     table.insert(searchData, {
                         uniqueId = uniqueId,
                         fileName = fileName,
-                        apiPhoto = photoResult.photo  -- Pasar el objeto completo para EXIF matching
+                        apiPhoto = photoResult.photo,  -- Pasar el objeto completo para EXIF matching
+                        totalScore = totalScore  -- Score para ordenar por relevancia
                     })
                 end
                 
                 else
-                    -- Foto filtrada por labelScore
-                    log:info(string.format("Foto %d FILTRADA - labelScore: %s no cumple criterio de precisión %d", 
-                        i, tostring(labelScore), precisionLevel))
+                    -- Foto filtrada por labelScore (solo log si es relevante)
+                    if Config.DEBUG_MODE then
+                        log:info(string.format("Foto %d filtrada por labelScore: %s", i, tostring(labelScore)))
+                    end
                 end
             end
             
@@ -406,13 +384,53 @@ LrFunctionContext.callWithContext('showSearchDialog', function(context)
                 return
             end
             
+            -- Ordenar por totalScore (mayor a menor) para que las fotos más relevantes aparezcan primero
+            -- TODO: Ordenamiento deshabilitado temporalmente para debug
+            -- table.sort(searchData, function(a, b)
+            --     return (a.totalScore or 0) > (b.totalScore or 0)
+            -- end)
+            -- log:info("Resultados ordenados por totalScore (relevancia)")
+            
             -- Buscar fotos en Lightroom usando el nuevo servicio de matcheo
+            -- NOTA: Esto puede tardar 60+ segundos en catálogos grandes (construye caché)
             local foundPhotos = nil
-            catalog:withReadAccessDo(function()
-                foundPhotos = SearchMatchService.findPhotos(catalog, searchData)
+            local matchError = nil
+            
+            LrFunctionContext.callWithContext('matchPhotos', function(matchContext)
+                local matchProgress = LrDialogs.showModalProgressDialog({
+                    title = 'Matching photos...',
+                    caption = 'Building catalog index (first time may take a while)...',
+                    functionContext = matchContext,
+                })
+                
+                local success, result = LrTasks.pcall(function()
+                    local photos = nil
+                    catalog:withReadAccessDo(function()
+                        photos = SearchMatchService.findPhotos(catalog, searchData)
+                    end)
+                    return photos
+                end)
+                
+                matchProgress:done()
+                
+                if success then
+                    foundPhotos = result
+                else
+                    matchError = tostring(result)
+                    log:error("Error en matcheo: " .. matchError)
+                end
             end)
             
-            if #foundPhotos == 0 then
+            if matchError then
+                LrDialogs.message(
+                    'Photoreka Search',
+                    'Error matching photos: ' .. matchError,
+                    'error'
+                )
+                return
+            end
+            
+            if not foundPhotos or #foundPhotos == 0 then
                 LrDialogs.message(
                     'Photoreka Search',
                     string.format('Found %d results, but none could be located in your Lightroom catalog.', totalResults),
@@ -421,7 +439,7 @@ LrFunctionContext.callWithContext('showSearchDialog', function(context)
                 return
             end
             
-            -- Crear colección con los resultados
+            -- Crear colección con los resultados (el orden ya se aplica dentro)
             local collectionName = "Photoreka Search: " .. searchQuery
             local collection = createOrUpdateCollection(catalog, collectionName, foundPhotos)
             

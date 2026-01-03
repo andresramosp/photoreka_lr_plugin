@@ -19,6 +19,7 @@ local ExportService = require 'ExportService'
 local ApiService = require 'ApiService'
 local ExifService = require 'ExifService'
 local AuthService = require 'AuthService'
+local PhotorekaCatalogService = require 'PhotorekaCatalogService'
 
 log:info("========================================")
 log:info("MAIN.LUA EJECUTÁNDOSE")
@@ -337,6 +338,32 @@ LrFunctionContext.callWithContext('showDialog', function(context)
             
             -- Esperar un momento para asegurar que el diálogo de progreso se cierre
             LrTasks.sleep(0.3)
+            
+            -- Marcar fotos exitosas con el metadato de Photoreka
+            if uploadResult.successfulUploads and #uploadResult.successfulUploads > 0 then
+                log:info("Marcando " .. tostring(#uploadResult.successfulUploads) .. " fotos como analizadas...")
+                local markedPhotos = {}
+                catalog:withWriteAccessDo('Mark Photoreka Analyzed', function()
+                    for i, photoData in ipairs(uploadResult.successfulUploads) do
+                        -- Encontrar la foto original correspondiente
+                        if photos[i] then
+                            photos[i]:setPropertyForPlugin(_PLUGIN, 'photorekaanalyzed', true)
+                            table.insert(markedPhotos, photos[i])
+                            log:info("✓ Foto " .. tostring(i) .. " marcada como analizada")
+                        end
+                    end
+                end)
+                log:info("Fotos marcadas correctamente")
+                
+                -- Invalidar caché de búsqueda para incluir las nuevas fotos
+                local SearchMatchService = require 'SearchMatchService'
+                SearchMatchService.invalidateCache()
+                
+                -- Actualizar la colección Photoreka automáticamente (incremental, rápido)
+                log:info("Actualizando colección Photoreka...")
+                PhotorekaCatalogService.updateCollection(markedPhotos)
+                log:info("Colección actualizada")
+            end
             
             -- Preparar mensaje de resultado
             local successCount = #uploadResult.successfulUploads

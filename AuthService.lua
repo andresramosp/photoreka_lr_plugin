@@ -297,7 +297,29 @@ function AuthService.showLoginDialog()
                 },
             },
             
-           
+            f:spacer { height = 8 },
+            
+            -- Enlace de registro
+            f:row {
+                fill_horizontal = 1,
+                
+                f:spacer { fill_horizontal = 1 },
+                
+                f:static_text {
+                    title = "Don't have an account? ",
+                    font = '<system/small>',
+                },
+                
+                f:push_button {
+                    title = 'Register on Photoreka',
+                    font = '<system/small>',
+                    action = function()
+                        LrHttp.openUrlInBrowser('https://www.photoreka.com/auth')
+                    end,
+                },
+                
+                f:spacer { fill_horizontal = 1 },
+            },
             
             -- Info de usuario guardado
             f:row {

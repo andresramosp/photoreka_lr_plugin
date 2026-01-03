@@ -7,35 +7,55 @@ return {
     
     -- VERSION = { major=1, minor=0, revision=0, build=0 },
     
+    -- Metadato personalizado para marcar fotos analizadas por Photoreka
+    LrMetadataProvider = 'MetadataDefinition.lua',
+    
     -- Agrega un ítem de menú en Biblioteca > Extras del módulo
     LrLibraryMenuItems = {
+          {
+            title = "🗂️ Your Workspace",
+            file = "ShowPhotorekaCatalog.lua",
+        },
         {
-            title = "Analyze Photos",
+            title = "🚀 Analyze Photos",
             file = "Main.lua",
         },
         {
-            title = "Search",
+            title = "🔎 Search Photos",
             file = "Search.lua",
+        },
+        {
+            title = "🛠️ Export to Tool",
+            file = "ExportToPhotoreka.lua",
+        },
+        {
+            title = "🧊 3D Atlas",
+            file = "Open3DAtlas.lua",
         },
     },
 
     -- Agrega el mismo ítem en Archivo > Extras del módulo (accesible desde cualquier módulo)
     LrExportMenuItems = {
         {
-            title = "Analyze Photos",
+            title = "🗂️ Your Workspace",
+            file = "ShowPhotorekaCatalog.lua",
+        },
+        {
+            title = "🚀 Analyze Photos",
             file = "Main.lua",
         },
         {
-            title = "Search",
+            title = "🔎 Search Photos",
             file = "Search.lua",
         },
         {
-            title = "Canvas",
-            file = "OpenCanvas.lua",
+            title = "🛠️ Export to Tool",
+            file = "ExportToPhotoreka.lua",
         },
         {
-            title = "3D Atlas",
+            title = "🧊 3D Atlas",
             file = "Open3DAtlas.lua",
         },
+      
     },
 }
