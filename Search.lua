@@ -17,6 +17,7 @@ local Config = require 'Config'
 local ApiService = require 'ApiService'
 local AuthService = require 'AuthService'
 local SearchMatchService = require 'SearchMatchService'
+local PhotorekaCollectionService = require 'PhotorekaCollectionService'
 
 log:info("========================================")
 log:info("SEARCH.LUA EJECUTÁNDOSE")
@@ -41,26 +42,33 @@ end
 -- Retorna: la colección creada/actualizada
 local function createOrUpdateCollection(catalog, collectionName, photos, searchData, useColorLabels)
     local collection = nil
-    local photorekaSet = nil
     
-    -- PASO 1: Buscar/crear el set y eliminar colecciones anteriores
-    catalog:withWriteAccessDo("Cleanup Search Collections", function()
-        -- Buscar o crear el collection set "Photoreka"
+    -- TRANSACCIÓN 0: Asegurar que existe el collection set "Photoreka"
+    -- Esto debe hacerse en una transacción separada para que Lightroom lo registre
+    local setExists = false
+    catalog:withWriteAccessDo("Ensure Photoreka Set Exists", function()
         local collectionSets = catalog:getChildCollectionSets()
-        
         for _, set in ipairs(collectionSets) do
             if set:getName() == "Photoreka" then
-                photorekaSet = set
-                log:info("Collection set 'Photoreka' encontrado")
+                setExists = true
                 break
             end
         end
         
-        -- Si no existe el set, crearlo
-        if not photorekaSet then
-            photorekaSet = catalog:createCollectionSet("Photoreka")
-            log:info("Collection set 'Photoreka' creado")
+        if not setExists then
+            catalog:createCollectionSet("Photoreka")
+            log:info("Collection set 'Photoreka' creado en transacción separada")
         end
+    end)
+    
+    -- Si acabamos de crear el set, dar tiempo a Lightroom para procesarlo
+    if not setExists then
+        LrTasks.sleep(0.1)
+    end
+    
+    -- TRANSACCIÓN 1: Limpiar colecciones anteriores
+    catalog:withWriteAccessDo("Cleanup Previous Search Collections", function()
+        local photorekaSet = PhotorekaCollectionService.getOrCreateSet(catalog)
         
         -- Buscar y eliminar cualquier colección de búsqueda anterior (empieza con "Photoreka Search -")
         local collections = photorekaSet:getChildCollections()
@@ -74,22 +82,17 @@ local function createOrUpdateCollection(catalog, collectionName, photos, searchD
         end
     end)
     
-    -- PASO 2: Crear la nueva colección (en transacción separada para evitar conflictos)
-    catalog:withWriteAccessDo("Create Search Results Collection", function()
-        -- Re-obtener el set (puede haber cambiado la referencia)
-        local collectionSets = catalog:getChildCollectionSets()
-        for _, set in ipairs(collectionSets) do
-            if set:getName() == "Photoreka" then
-                photorekaSet = set
-                break
-            end
-        end
+    -- TRANSACCIÓN 2: Crear la nueva colección y añadir fotos
+    catalog:withWriteAccessDo("Create Search Collection", function()
+        -- Re-obtener el collection set (la referencia puede haber cambiado)
+        local photorekaSet = PhotorekaCollectionService.getOrCreateSet(catalog)
         
         -- Crear la nueva colección dentro del set Photoreka
-        collection = catalog:createCollection(collectionName, photorekaSet)
+        -- El tercer parámetro 'true' permite usar la colección inmediatamente
+        collection = catalog:createCollection(collectionName, photorekaSet, true)
         log:info("Nueva colección creada: " .. collectionName .. " (dentro de Photoreka)")
         
-        -- Añadir las nuevas fotos
+        -- Añadir las fotos
         if #photos > 0 then
             collection:addPhotos(photos)
             log:info(tostring(#photos) .. " fotos añadidas a la colección")
@@ -165,7 +168,7 @@ LrFunctionContext.callWithContext('showSearchDialog', function(context)
         if newValue == true then
             local confirmResult = LrDialogs.confirm(
                 'This will modify color labels on your original photos.',
-                'Photos will be marked with color labels based on search relevance:\n\n• Green = Excellent match\n• Yellow = Good match\n• Blue = Fair match\n\nPrevious labels applied by Photoreka will be removed.\n\nDo you want to continue?',
+                'Photos will be marked with color labels based on search relevance:\n\n• Green = Excellent match\n• Yellow = Good match\n• Blue = Fair match.\n\nDo you want to continue?',
                 'Continue',
                 'Cancel'
             )
@@ -388,24 +391,59 @@ LrFunctionContext.callWithContext('showSearchDialog', function(context)
                     functionContext = searchContext,
                 })
                 
-                -- Llamar a la API de búsqueda con searchMode
-                local success, result = LrTasks.pcall(function()
-                    return ApiService.search(searchQuery, searchMode)
+                -- Variables compartidas para comunicación entre tasks
+                local apiCompleted = false
+                local apiSuccess = false
+                local apiResult = nil
+                
+                -- Generar tiempo estimado aleatorio entre 5 y 10 segundos
+                local estimatedTime = math.random(5, 10)
+                local updateInterval = 0.1  -- Actualizar cada 0.1 segundos
+                local totalSteps = estimatedTime / updateInterval
+                local currentStep = 0
+                
+                log:info(string.format("Simulando progreso durante ~%d segundos", estimatedTime))
+                
+                -- Iniciar la llamada a la API en un async task separado
+                LrTasks.startAsyncTask(function()
+                    apiSuccess, apiResult = LrTasks.pcall(function()
+                        return ApiService.search(searchQuery, searchMode)
+                    end)
+                    apiCompleted = true
                 end)
+                
+                -- Simular progreso mientras esperamos
+                while not apiCompleted and currentStep < totalSteps do
+                    currentStep = currentStep + 1
+                    local progress = currentStep / totalSteps
+                    progressScope:setPortionComplete(progress, 1.0)
+                    LrTasks.sleep(updateInterval)
+                end
+                
+                -- Si la API terminó antes del tiempo estimado, completar la barra rápidamente
+                if apiCompleted and currentStep < totalSteps then
+                    progressScope:setPortionComplete(1.0, 1.0)
+                    LrTasks.sleep(0.2)  -- Breve pausa para que se vea la barra completa
+                end
+                
+                -- Si el tiempo se acabó pero la API no terminó, esperar a que termine
+                while not apiCompleted do
+                    LrTasks.sleep(0.1)
+                end
                 
                 progressScope:done()
                 
-                if not success then
-                    log:error("Error en búsqueda: " .. tostring(result))
+                if not apiSuccess then
+                    log:error("Error en búsqueda: " .. tostring(apiResult))
                     LrDialogs.message(
                         'Photoreka Search',
-                        'Search failed: ' .. tostring(result),
+                        'Search failed: ' .. tostring(apiResult),
                         'error'
                     )
                     return
                 end
                 
-                searchResults = result
+                searchResults = apiResult
             end)
             
             if not searchResults then
@@ -573,7 +611,13 @@ LrFunctionContext.callWithContext('showSearchDialog', function(context)
                 local success, result = LrTasks.pcall(function()
                     local photos = nil
                     catalog:withReadAccessDo(function()
-                        photos = SearchMatchService.findPhotos(catalog, searchData)
+                        -- Pasar callback de progreso real
+                        photos = SearchMatchService.findPhotos(catalog, searchData, function(current, total, caption)
+                            matchProgress:setPortionComplete(current, total)
+                            -- Remover el conteo numérico del caption (mantener solo el texto descriptivo)
+                            local cleanCaption = caption:gsub("%s*%(%d+/%d+%)%.%.%.$", "...")
+                            matchProgress:setCaption(cleanCaption)
+                        end)
                     end)
                     return photos
                 end)
@@ -635,7 +679,15 @@ LrFunctionContext.callWithContext('showSearchDialog', function(context)
             local collection = createOrUpdateCollection(catalog, collectionName, foundPhotos, searchData, useColorLabels)
             
             -- Abrir la colección automáticamente
+            -- IMPORTANTE: Primero desactivamos todas las sources, esperamos un momento,
+            -- y luego activamos la colección para forzar que Lightroom haga scroll al inicio
             if collection then
+                catalog:setActiveSources({})
+                log:info("Todas las sources desactivadas antes de activar la colección")
+                
+                -- Pequeño delay para permitir que Lightroom procese la desactivación
+                LrTasks.sleep(0.1)
+                
                 catalog:setActiveSources({ collection })
                 log:info("Colección activada en el catálogo")
             end

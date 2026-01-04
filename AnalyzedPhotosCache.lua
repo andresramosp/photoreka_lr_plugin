@@ -92,7 +92,7 @@ function AnalyzedPhotosCache.buildOrUpdate(catalog, progressCallback)
         
         -- Reportar progreso cada 100 fotos para no saturar
         if progressCallback and (i % 100 == 0 or i == totalCatalogPhotos) then
-            progressCallback(i, totalCatalogPhotos, string.format('Building Catalog (first time may take a while) (%d/%d)...', i, totalCatalogPhotos))
+            progressCallback(i, totalCatalogPhotos, string.format('Building Catalog (first time may take a while)', i, totalCatalogPhotos))
         end
     end
     
