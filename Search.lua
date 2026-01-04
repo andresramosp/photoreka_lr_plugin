@@ -49,29 +49,53 @@ end
 -- Retorna: la colección creada/actualizada
 local function createOrUpdateCollection(catalog, collectionName, photos, searchData)
     local collection = nil
+    local photorekaSet = nil
     
-    catalog:withWriteAccessDo("Create Search Results Collection", function()
-        -- Buscar si ya existe la colección
-        local collections = catalog:getChildCollections()
+    -- PASO 1: Buscar/crear el set y eliminar colecciones anteriores
+    catalog:withWriteAccessDo("Cleanup Search Collections", function()
+        -- Buscar o crear el collection set "Photoreka"
+        local collectionSets = catalog:getChildCollectionSets()
         
-        for _, coll in ipairs(collections) do
-            if coll:getName() == collectionName then
-                collection = coll
-                log:info("Colección existente encontrada: " .. collectionName)
+        for _, set in ipairs(collectionSets) do
+            if set:getName() == "Photoreka" then
+                photorekaSet = set
+                log:info("Collection set 'Photoreka' encontrado")
                 break
             end
         end
         
-        -- Si no existe, crearla
-        if not collection then
-            collection = catalog:createCollection(collectionName)
-            log:info("Nueva colección creada: " .. collectionName)
-        else
-            -- Limpiar la colección existente
-            log:info("Limpiando colección existente...")
-            collection:removeAllPhotos()
-            log:info("Colección limpiada")
+        -- Si no existe el set, crearlo
+        if not photorekaSet then
+            photorekaSet = catalog:createCollectionSet("Photoreka")
+            log:info("Collection set 'Photoreka' creado")
         end
+        
+        -- Buscar y eliminar cualquier colección de búsqueda anterior (empieza con "Photoreka Search -")
+        local collections = photorekaSet:getChildCollections()
+        
+        for _, coll in ipairs(collections) do
+            local collName = coll:getName()
+            if collName:find("^Photoreka Search %-") then
+                log:info("Eliminando colección de búsqueda anterior: " .. collName)
+                coll:delete()
+            end
+        end
+    end)
+    
+    -- PASO 2: Crear la nueva colección (en transacción separada para evitar conflictos)
+    catalog:withWriteAccessDo("Create Search Results Collection", function()
+        -- Re-obtener el set (puede haber cambiado la referencia)
+        local collectionSets = catalog:getChildCollectionSets()
+        for _, set in ipairs(collectionSets) do
+            if set:getName() == "Photoreka" then
+                photorekaSet = set
+                break
+            end
+        end
+        
+        -- Crear la nueva colección dentro del set Photoreka
+        collection = catalog:createCollection(collectionName, photorekaSet)
+        log:info("Nueva colección creada: " .. collectionName .. " (dentro de Photoreka)")
         
         -- Añadir las nuevas fotos
         if #photos > 0 then
