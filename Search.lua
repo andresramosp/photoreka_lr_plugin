@@ -22,15 +22,6 @@ log:info("========================================")
 log:info("SEARCH.LUA EJECUTÁNDOSE")
 log:info("========================================")
 
--- Función para mapear labelScore a Rating (0-3 estrellas)
-local function scoreToRating(labelScore)
-    if labelScore == "excellent" then return 3
-    elseif labelScore == "good" then return 2
-    elseif labelScore == "fair" then return 1
-    elseif labelScore == "poor" then return 0
-    else return 0 end
-end
-
 -- Función para mapear labelScore a Label (color)
 local function labelScoreToColor(labelScore)
     if labelScore == "excellent" then return "green"
@@ -46,8 +37,9 @@ end
 --   collectionName: nombre de la colección
 --   photos: array de fotos a añadir (ya ordenado por relevancia)
 --   searchData: array con información de scores para cada foto
+--   useColorLabels: boolean - si se deben aplicar color labels
 -- Retorna: la colección creada/actualizada
-local function createOrUpdateCollection(catalog, collectionName, photos, searchData)
+local function createOrUpdateCollection(catalog, collectionName, photos, searchData, useColorLabels)
     local collection = nil
     local photorekaSet = nil
     
@@ -102,30 +94,50 @@ local function createOrUpdateCollection(catalog, collectionName, photos, searchD
             collection:addPhotos(photos)
             log:info(tostring(#photos) .. " fotos añadidas a la colección")
             
-            -- Aplicar Rating y Label basados en scores de búsqueda
+            -- PASO 1: Limpiar color labels anteriores de fotos marcadas por el plugin
+            -- Esto se hace SIEMPRE, independientemente de useColorLabels
+            local cleanedCount = 0
             for i, photo in ipairs(photos) do
-                -- Buscar el searchData correspondiente a esta foto
-                local photoData = searchData[i]
-                if photoData and photoData.apiPhoto then
-                    local labelScore = photoData.apiPhoto.labelScore
-                    
-                    -- Aplicar Rating basado en labelScore (0-3 estrellas)
-                    local rating = scoreToRating(labelScore)
-                    photo:setRawMetadata("rating", rating)
-                    
-                    -- Aplicar Label basado en labelScore
-                    local colorLabel = labelScoreToColor(labelScore)
-                    if colorLabel then
-                        photo:setRawMetadata("colorNameForLabel", colorLabel)
-                    end
-                    
-                    log:info(string.format("Foto %d: Rating=%d, Label=%s (totalScore=%.3f, labelScore=%s)", 
-                        i, rating, colorLabel or "none", 
-                        photoData.totalScore or 0, labelScore or "none"))
+                local hasPluginMetadata = photo:getPropertyForPlugin(_PLUGIN, 'photorekasearchmetadata')
+                if hasPluginMetadata then
+                    -- Esta foto fue marcada anteriormente por el plugin, limpiar su label
+                    photo:setRawMetadata("colorNameForLabel", "")
+                    -- Quitar el metadato de marcado
+                    photo:setPropertyForPlugin(_PLUGIN, 'photorekasearchmetadata', false)
+                    cleanedCount = cleanedCount + 1
                 end
             end
+            if cleanedCount > 0 then
+                log:info(string.format("%d color labels anteriores limpiados", cleanedCount))
+            end
             
-            log:info("Ratings y Labels aplicados según relevancia")
+            -- PASO 2: Aplicar nuevos color labels solo si useColorLabels está activado
+            if useColorLabels then
+                local appliedCount = 0
+                for i, photo in ipairs(photos) do
+                    -- Buscar el searchData correspondiente a esta foto
+                    local photoData = searchData[i]
+                    if photoData and photoData.apiPhoto then
+                        local labelScore = photoData.apiPhoto.labelScore
+                        
+                        -- Aplicar Label basado en labelScore
+                        local colorLabel = labelScoreToColor(labelScore)
+                        if colorLabel then
+                            photo:setRawMetadata("colorNameForLabel", colorLabel)
+                            -- Marcar esta foto con el metadato del plugin
+                            photo:setPropertyForPlugin(_PLUGIN, 'photorekasearchmetadata', true)
+                            appliedCount = appliedCount + 1
+                            
+                            log:info(string.format("Foto %d: Label=%s (totalScore=%.3f, labelScore=%s)", 
+                                i, colorLabel, 
+                                photoData.totalScore or 0, labelScore or "none"))
+                        end
+                    end
+                end
+                log:info(string.format("%d color labels aplicados", appliedCount))
+            else
+                log:info("Color labels no aplicados (opción desactivada)")
+            end
         end
     end)
     
@@ -145,6 +157,28 @@ LrFunctionContext.callWithContext('showSearchDialog', function(context)
     props.isSearching = false
     -- props.precisionLevel = 2  -- Por defecto: relaxed (1=relaxed, 2=fair, 3=strict)
     props.searchMode = "adaptive"  -- Por defecto: adaptive (opciones: broad, adaptive, precise)
+    props.useColorLabels = false  -- Por defecto: no aplicar color labels
+    
+    -- Observer para el checkbox de useColorLabels
+    props:addObserver('useColorLabels', function(properties, key, newValue)
+        -- Solo mostrar confirmación cuando se marca (true), no cuando se desmarca
+        if newValue == true then
+            local confirmResult = LrDialogs.confirm(
+                'This will modify color labels on your original photos.',
+                'Photos will be marked with color labels based on search relevance:\n\n• Green = Excellent match\n• Yellow = Good match\n• Blue = Fair match\n\nPrevious labels applied by Photoreka will be removed.\n\nDo you want to continue?',
+                'Continue',
+                'Cancel'
+            )
+            
+            if confirmResult == 'cancel' then
+                -- Desmarcar el checkbox si cancela
+                props.useColorLabels = false
+                log:info("Usuario canceló la activación de color labels")
+            else
+                log:info("Usuario confirmó el uso de color labels")
+            end
+        end
+    end)
     
     -- Obtener información del usuario autenticado
     local userInfo = AuthService.getStoredUserInfo()
@@ -280,6 +314,19 @@ LrFunctionContext.callWithContext('showSearchDialog', function(context)
                 checked_value = 'precise',
             },
         },
+        
+        f:spacer { height = 10 },
+        
+        -- Checkbox para usar color labels
+        f:row {
+            fill_horizontal = 1,
+            spacing = f:control_spacing(),
+            
+            f:checkbox {
+                title = 'Use color labels',
+                value = LrView.bind('useColorLabels'),
+            },
+        },
     }
     
     -- Mostrar el diálogo
@@ -302,6 +349,7 @@ LrFunctionContext.callWithContext('showSearchDialog', function(context)
         local searchQuery = props.searchQuery
         -- local precisionLevel = props.precisionLevel  -- COMENTADO: Reemplazado por searchMode
         local searchMode = props.searchMode
+        local useColorLabels = props.useColorLabels
         
         -- Validar que no esté vacío
         if not searchQuery or searchQuery == "" then
@@ -584,7 +632,7 @@ LrFunctionContext.callWithContext('showSearchDialog', function(context)
                 end
             end)
             
-            local collection = createOrUpdateCollection(catalog, collectionName, foundPhotos, searchData)
+            local collection = createOrUpdateCollection(catalog, collectionName, foundPhotos, searchData, useColorLabels)
             
             -- Abrir la colección automáticamente
             if collection then
