@@ -1,9 +1,11 @@
 -- PhotorekaCatalogService.lua - Servicio para gestionar la colección de fotos analizadas
 local LrApplication = import 'LrApplication'
 
+local AnalyzedPhotosCache = require 'AnalyzedPhotosCache'
+local PhotorekaCollectionService = require 'PhotorekaCollectionService'
+
 local PhotorekaCatalogService = {}
 
-local COLLECTION_SET_NAME = "Photoreka"
 local COLLECTION_NAME = "Photoreka - Analyzed Photos"
 
 -- Actualiza la colección con fotos que tienen el metadato marcado
@@ -15,17 +17,8 @@ function PhotorekaCatalogService.updateCollection(newPhotos)
     local photorekaSet = nil
     
     catalog:withWriteAccessDo('Update Photoreka Catalog', function()
-        -- Buscar o crear Collection Set "Photoreka"
-        local allSets = catalog:getChildCollectionSets()
-        for _, set in ipairs(allSets) do
-            if set:getName() == COLLECTION_SET_NAME then
-                photorekaSet = set
-                break
-            end
-        end
-        if not photorekaSet then
-            photorekaSet = catalog:createCollectionSet(COLLECTION_SET_NAME)
-        end
+        -- Obtener o crear el collection set "Photoreka" (usando servicio compartido)
+        photorekaSet = PhotorekaCollectionService.getOrCreateSet(catalog)
 
         -- Buscar o crear la colección
         local allCollections = catalog:getChildCollections()
@@ -58,22 +51,12 @@ function PhotorekaCatalogService.rebuildCollection(progressCallback)
     local photorekaSet = nil
     local analyzedPhotos = {}
 
-    -- FASE DE LECTURA: recopilar fotos analizadas
+    -- FASE DE LECTURA: usar caché centralizado para obtener fotos analizadas
     catalog:withReadAccessDo(function()
-        local allPhotos = catalog:getAllPhotos()
-        local totalPhotos = #allPhotos
-        
-        for i, photo in ipairs(allPhotos) do
-            local isAnalyzed = photo:getPropertyForPlugin(_PLUGIN, 'photorekaanalyzed')
-            if isAnalyzed == true then
-                table.insert(analyzedPhotos, photo)
-            end
-            
-            -- Reportar progreso cada 100 fotos para no saturar
-            if progressCallback and (i % 100 == 0 or i == totalPhotos) then
-                progressCallback(i, totalPhotos, string.format('Scanning catalog (%d/%d)...', i, totalPhotos))
-            end
-        end
+        -- Construir/actualizar caché con reporte de progreso
+        AnalyzedPhotosCache.buildOrUpdate(catalog, progressCallback)
+        -- Obtener las fotos del caché
+        analyzedPhotos = AnalyzedPhotosCache.getPhotos()
     end)
 
     -- FASE DE ESCRITURA: crear/actualizar colección
@@ -82,17 +65,8 @@ function PhotorekaCatalogService.rebuildCollection(progressCallback)
     end
     
     catalog:withWriteAccessDo('Update Photoreka Catalog', function()
-        -- Buscar o crear Collection Set "Photoreka"
-        local allSets = catalog:getChildCollectionSets()
-        for _, set in ipairs(allSets) do
-            if set:getName() == COLLECTION_SET_NAME then
-                photorekaSet = set
-                break
-            end
-        end
-        if not photorekaSet then
-            photorekaSet = catalog:createCollectionSet(COLLECTION_SET_NAME)
-        end
+        -- Obtener o crear el collection set "Photoreka" (usando servicio compartido)
+        photorekaSet = PhotorekaCollectionService.getOrCreateSet(catalog)
 
         -- Buscar o crear la colección
         local allCollections = catalog:getChildCollections()

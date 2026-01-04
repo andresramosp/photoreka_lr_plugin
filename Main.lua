@@ -355,9 +355,9 @@ LrFunctionContext.callWithContext('showDialog', function(context)
                 end)
                 log:info("Fotos marcadas correctamente")
                 
-                -- Invalidar caché de búsqueda para incluir las nuevas fotos
-                local SearchMatchService = require 'SearchMatchService'
-                SearchMatchService.invalidateCache()
+                -- Invalidar caché centralizado para incluir las nuevas fotos
+                local AnalyzedPhotosCache = require 'AnalyzedPhotosCache'
+                AnalyzedPhotosCache.invalidate()
                 
                 -- Actualizar la colección Photoreka automáticamente (incremental, rápido)
                 log:info("Actualizando colección Photoreka...")

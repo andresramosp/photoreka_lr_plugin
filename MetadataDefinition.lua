@@ -18,7 +18,24 @@ return {
             searchable = true,
             browsable = true,
         },
+        {
+            id = 'photorekasearchmetadata',
+            title = 'Photoreka Search Metadata Applied',
+            dataType = 'enum',
+            values = {
+                {
+                    value = true,
+                    title = 'Yes',
+                },
+                {
+                    value = false,
+                    title = 'No',
+                },
+            },
+            searchable = true,
+            browsable = true,
+        },
     },
     
-    schemaVersion = 1,
+    schemaVersion = 2,
 }
