@@ -538,4 +538,50 @@ function ApiService.search(query, searchMode)
     return searchResults
 end
 
+-- Crea un token handoff efímero para exportar fotos a Photoreka
+-- Retorna: string con el token handoff o nil si falla
+function ApiService.createHandoff()
+    local token = getAuthToken()
+    
+    local url = Config.API_BASE_URL .. "/api/auth_lr/create-handoff"
+    
+    log:info("Solicitando handoff token...")
+    log:info("URL: " .. url)
+    
+    local headers = {
+        { field = "Authorization", value = "Bearer " .. token },
+        { field = "Content-Type", value = "application/json" }
+    }
+    
+    local body = JSON.encode({})
+    local response, responseHeaders = LrHttp.post(url, body, headers)
+    
+    if not response then
+        log:error("ERROR: No response from handoff API")
+        return nil
+    end
+    
+    -- Verificar código de estado
+    if responseHeaders and responseHeaders.status then
+        local statusCode = tonumber(responseHeaders.status)
+        log:info("Handoff API status code: " .. tostring(statusCode))
+        
+        if statusCode and (statusCode < 200 or statusCode >= 300) then
+            log:error("Handoff API error " .. tostring(statusCode) .. ": " .. tostring(response))
+            return nil
+        end
+    end
+    
+    log:info("Decodificando handoff response...")
+    local responseData = JSON.decode(response)
+    
+    if responseData and responseData.handoffToken then
+        log:info("Handoff token obtenido exitosamente")
+        return responseData.handoffToken
+    else
+        log:error("Handoff response no contiene handoffToken")
+        return nil
+    end
+end
+
 return ApiService

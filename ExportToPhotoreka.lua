@@ -9,6 +9,9 @@ local LrTasks = import 'LrTasks'
 local LrApplication = import 'LrApplication'
 local LrHttp = import 'LrHttp'
 local LrLogger = import 'LrLogger'
+local Config = require 'Config'
+
+local ApiService = require 'ApiService'
 
 -- Configurar logger
 local log = LrLogger('PhotorekaExport')
@@ -39,9 +42,18 @@ local function exportToPage(pagePath, pageName, targetPhotos)
         return
     end
     
-    -- Construir la URL con los IDs como querystring
+    -- Obtener handoff token
+    log:info("Obteniendo handoff token...")
+    local handoffToken = ApiService.createHandoff()
+    
+    if not handoffToken then
+        LrDialogs.message("Export to " .. pageName, "Could not obtain authentication token. Please try again.", "warning")
+        return
+    end
+    
+    -- Construir la URL con los IDs y el handoff token como querystring
     local idsParam = table.concat(uniqueIds, ",")
-    local url = "https://www.photoreka.com" .. pagePath .. "?source=lightroom&ids=" .. idsParam
+    local url = Config.APP_BASE_URL .. pagePath .. "?source=lightroom&ids=" .. idsParam .. "&lr_handoff=" .. handoffToken
     
     log:info("Opening URL: " .. url)
     
