@@ -343,7 +343,12 @@ LrFunctionContext.callWithContext('showSearchDialog', function(context)
     
     -- Si el usuario hace clic en "Advanced search"
     if result == 'other' then
-        LrHttp.openUrlInBrowser('https://www.photoreka.com/search')
+        local handoffToken = ApiService.createHandoff()
+        local url = Config.APP_BASE_URL .. '/search'
+        if handoffToken then
+            url = url .. '?lr_handoff=' .. handoffToken
+        end
+        LrHttp.openUrlInBrowser(url)
         return
     end
     

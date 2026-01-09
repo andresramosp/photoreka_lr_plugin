@@ -314,7 +314,7 @@ function AuthService.showLoginDialog()
                     title = 'Register on Photoreka',
                     font = '<system/small>',
                     action = function()
-                        LrHttp.openUrlInBrowser('https://www.photoreka.com/auth')
+                        LrHttp.openUrlInBrowser(Config.APP_BASE_URL .. '/auth')
                     end,
                 },
                 

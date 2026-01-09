@@ -454,13 +454,19 @@ LrFunctionContext.callWithContext('showDialog', function(context)
             
             -- Enlace a Photoreka (varía según el modo)
             if successCount > 0 then
-                local linkText, linkUrl
+                local linkText, linkPath
                 if onlyToLightbox then
                     linkText = '🔎 Review your photos here before processing'
-                    linkUrl = 'https://www.photoreka.com/photo-hub#upload'
+                    linkPath = '/photo-hub#upload'
                 else
                     linkText = '🔎 Monitor processing here'
-                    linkUrl = 'https://www.photoreka.com/photo-hub#processing'
+                    linkPath = '/photo-hub#processing'
+                end
+                
+                local handoffToken = ApiService.createHandoff()
+                local linkUrl = Config.APP_BASE_URL .. linkPath
+                if handoffToken then
+                    linkUrl = linkUrl .. '?lr_handoff=' .. handoffToken
                 end
                 
                 table.insert(dialogComponents, f:static_text {

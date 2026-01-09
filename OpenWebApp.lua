@@ -1,9 +1,16 @@
--- Open3DAtlas.lua
--- Abre 3D Atlas de Photoreka en el navegador web
+-- OpenWebApp.lua
+-- Abre Photo Hub de Photoreka en el navegador web
 
 local LrHttp = import 'LrHttp'
 local LrTasks = import 'LrTasks'
+local Config = require 'Config'
+local ApiService = require 'ApiService'
 
 LrTasks.startAsyncTask(function()
-    LrHttp.openUrlInBrowser("https://www.photoreka.com/photo-hub#catalog")
+    local handoffToken = ApiService.createHandoff()
+    local url = Config.APP_BASE_URL .. '/photo-hub#catalog'
+    if handoffToken then
+        url = url .. '?lr_handoff=' .. handoffToken
+    end
+    LrHttp.openUrlInBrowser(url)
 end)
