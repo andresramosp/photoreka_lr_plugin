@@ -151,6 +151,21 @@ local function requestUploadUrls(originalName, exifData, sourceData)
         
         if statusCode and (statusCode < 200 or statusCode >= 300) then
             log:error("Server error " .. tostring(statusCode) .. ": " .. tostring(response))
+            
+            -- Detectar error de email no confirmado
+            if statusCode == 403 and response then
+                local success, errorData = pcall(function() return JSON.decode(response) end)
+                if success and errorData and errorData.code == "EMAIL_NOT_CONFIRMED" then
+                    -- Mostrar diálogo al usuario
+                    LrDialogs.message(
+                        "Email Not Confirmed",
+                        "Please confirm your email address before uploading photos. Check your inbox for the confirmation email from Photoreka.",
+                        "info"
+                    )
+                    error("Email not confirmed. Please check your inbox and confirm your email address.")
+                end
+            end
+            
             error(string.format("Server returned error %d: %s", statusCode, response or "unknown error"))
         end
     end

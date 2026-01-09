@@ -12,13 +12,18 @@ return {
     
     -- Agrega un ítem de menú en Biblioteca > Extras del módulo
     LrLibraryMenuItems = {
-          {
+        {
+            title = "👤 Account",
+            file = "ManageAccount.lua",
+        },
+        {
             title = "🗂️ Your Workspace",
             file = "ShowPhotorekaCatalog.lua",
         },
         {
             title = "🚀 Analyze Photos",
             file = "Main.lua",
+            -- enabledWhen = "photosSelected"
         },
         {
             title = "🔎 Search Photos",
@@ -27,22 +32,28 @@ return {
         {
             title = "🛠️ Export to Tool",
             file = "ExportToPhotoreka.lua",
+            -- enabledWhen = "photosSelected"
         },
         {
-            title = "🧊 3D Atlas",
-            file = "Open3DAtlas.lua",
+            title = "🌐 Web App",
+            file = "OpenWebApp.lua",
         },
     },
 
     -- Agrega el mismo ítem en Archivo > Extras del módulo (accesible desde cualquier módulo)
     LrExportMenuItems = {
         {
+            title = "👤 Account",
+            file = "ManageAccount.lua",
+        },
+        {
             title = "🗂️ Your Workspace",
             file = "ShowPhotorekaCatalog.lua",
         },
         {
             title = "🚀 Analyze Photos",
             file = "Main.lua",
+            -- enabledWhen = "photosSelected"
         },
         {
             title = "🔎 Search Photos",
@@ -51,10 +62,11 @@ return {
         {
             title = "🛠️ Export to Tool",
             file = "ExportToPhotoreka.lua",
+            -- enabledWhen = "photosSelected"
         },
         {
-            title = "🧊 3D Atlas",
-            file = "Open3DAtlas.lua",
+            title = "🌐 Web App",
+            file = "OpenWebApp.lua",
         },
       
     },
