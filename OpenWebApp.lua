@@ -8,7 +8,7 @@ local ApiService = require 'ApiService'
 
 LrTasks.startAsyncTask(function()
     local handoffToken = ApiService.createHandoff()
-    local url = Config.APP_BASE_URL .. '/photo-hub#catalog'
+    local url = Config.APP_BASE_URL .. '/workspace'
     if handoffToken then
         url = url .. '?lr_handoff=' .. handoffToken
     end

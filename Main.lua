@@ -457,10 +457,10 @@ LrFunctionContext.callWithContext('showDialog', function(context)
                 local linkText, linkPath
                 if onlyToLightbox then
                     linkText = '🔎 Review your photos here before processing'
-                    linkPath = '/photo-hub#upload'
+                    linkPath = '/sync-area#upload'
                 else
                     linkText = '🔎 Monitor processing here'
-                    linkPath = '/photo-hub#processing'
+                    linkPath = '/sync-area#processing'
                 end
                 
                 local handoffToken = ApiService.createHandoff()
