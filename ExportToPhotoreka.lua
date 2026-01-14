@@ -114,6 +114,12 @@ LrTasks.startAsyncTask(function()
                 value = LrView.bind 'selectedOption',
                 checked_value = "framer",
             },
+            
+            f:radio_button {
+                title = "3D Atlas",
+                value = LrView.bind 'selectedOption',
+                checked_value = "atlas",
+            },
         }
         
         local result = LrDialogs.presentModalDialog {
@@ -132,6 +138,12 @@ LrTasks.startAsyncTask(function()
                 --     exportToPage("/series", "Series", targetPhotos)
                 elseif option == "framer" then
                     exportToPage("/framer", "Framer", targetPhotos)
+                elseif option == "atlas" then
+                    if #targetPhotos > 1 then
+                        LrDialogs.message("Export to 3D Atlas", "3D Atlas only accepts one photo at a time. You have selected " .. #targetPhotos .. " photos.", "warning")
+                    else
+                        exportToPage("/atlas", "3D Atlas", targetPhotos)
+                    end
                 end
             end)
         end
