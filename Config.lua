@@ -12,7 +12,7 @@ local Config = {}
 Config.API_BASE_URL = 'https://curatorlabapi-production.up.railway.app'
 
 -- Config.APP_BASE_URL = 'http://localhost:5173'
-Config.APP_BASE_URL = 'https://www.photoreka.com'
+Config.APP_BASE_URL = 'https://app.photoreka.com'
 
 -- URL de la API del Analyzer (normalmente la misma que API_BASE_URL)
 -- Config.ANALYZER_API_BASE_URL = 'http://localhost:3333'

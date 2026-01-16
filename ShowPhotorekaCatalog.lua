@@ -4,7 +4,7 @@ local LrHttp = import 'LrHttp'
 local LrTasks = import 'LrTasks'
 
 -- LrTasks.startAsyncTask(function()
---     LrHttp.openUrlInBrowser("https://www.photoreka.com/photo-hub#catalog")
+--     LrHttp.openUrlInBrowser("https://app.photoreka.com/photo-hub#catalog")
 -- end)
 
 
