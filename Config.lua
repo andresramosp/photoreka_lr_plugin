@@ -42,6 +42,6 @@ Config.CONCURRENT_UPLOADS = 5
 -- ========================================
 
 -- Número máximo de fotos que se pueden procesar en una sola exportación
-Config.MAX_PHOTOS = 2000
+Config.MAX_PHOTOS = 5000
 
 return Config
