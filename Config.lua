@@ -27,6 +27,24 @@ Config.ANALYZER_API_BASE_URL = 'https://photorekaanalyzerapi-production.up.railw
 -- false = extraer EXIF reales de las fotos
 Config.USE_MOCK_EXIF = false
 
+-- Parámetros alineados con la compresión iterativa del frontend web.
+Config.EXPORT_ENABLE_QUALITY_REDUCTION = true
+Config.EXPORT_PARALLEL_VARIANTS = true
+Config.EXPORT_FULL_MAX_WIDTH = 1500
+Config.EXPORT_FULL_MAX_HEIGHT = 1500
+Config.EXPORT_THUMB_MAX_WIDTH = 800
+Config.EXPORT_THUMB_MAX_HEIGHT = 800
+Config.EXPORT_FULL_MAX_SIZE_BYTES = 512000
+Config.EXPORT_THUMB_MAX_SIZE_BYTES = math.floor(
+	Config.EXPORT_FULL_MAX_SIZE_BYTES *
+	(Config.EXPORT_THUMB_MAX_WIDTH / Config.EXPORT_FULL_MAX_WIDTH)
+)
+Config.EXPORT_JPEG_QUALITY_INITIAL = 0.9
+Config.EXPORT_JPEG_QUALITY_DECREMENT = 0.1
+Config.EXPORT_JPEG_QUALITY_MIN = 0.1
+Config.EXPORT_MAX_ATTEMPTS = 5
+Config.EXPORT_SIZE_TOLERANCE_RATIO = 1.08
+
 -- ========================================
 -- CONFIGURACIÓN DE SUBIDA
 -- ========================================
