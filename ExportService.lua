@@ -156,15 +156,35 @@ end
 
 local function exportVariantPhotos(photos, targetPaths, variantConfig, onPhotoExported)
     for i, photo in ipairs(photos) do
-        targetPaths[i] = exportPhotoWithSizeCap(
-            photo,
-            variantConfig.getFolder(i),
-            variantConfig.maxWidth,
-            variantConfig.maxHeight,
-            variantConfig.maxSizeBytes,
-            variantConfig.label,
-            i
-        )
+        local targetFolder = variantConfig.getFolder(i)
+        local success, result = LrTasks.pcall(function()
+            return exportPhotoWithSizeCap(
+                photo,
+                targetFolder,
+                variantConfig.maxWidth,
+                variantConfig.maxHeight,
+                variantConfig.maxSizeBytes,
+                variantConfig.label,
+                i
+            )
+        end)
+
+        if success then
+            targetPaths[i] = result
+        else
+            targetPaths[i] = nil
+
+            if targetFolder and LrFileUtils.exists(targetFolder) then
+                LrFileUtils.delete(targetFolder)
+            end
+
+            log:warn(string.format(
+                '%s photo %d skipped during export: %s',
+                variantConfig.label,
+                i,
+                tostring(result)
+            ))
+        end
 
         if onPhotoExported then
             onPhotoExported(i)
@@ -229,7 +249,8 @@ function ExportService.exportPhotos(photos, exportFolder, progressCallback)
 
         return {
             fullPhotos = fullPhotos,
-            thumbPhotos = thumbPhotos
+            thumbPhotos = thumbPhotos,
+            totalCount = totalPhotos
         }
     end
 
@@ -266,7 +287,8 @@ function ExportService.exportPhotos(photos, exportFolder, progressCallback)
 
     return {
         fullPhotos = fullPhotos,
-        thumbPhotos = thumbPhotos
+        thumbPhotos = thumbPhotos,
+        totalCount = totalPhotos
     }
 end
 

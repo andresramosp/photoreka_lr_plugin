@@ -134,10 +134,26 @@ LrFunctionContext.callWithContext('showDialog', function(context)
     
     -- Crear el grid de miniaturas
     local f = LrView.osFactory()
-    
+
+    -- Extraer segmentos del path de la primera foto para el selector de root
+    local firstPhotoSegments = {}
+    catalog:withReadAccessDo(function()
+        local path = photos[1]:getRawMetadata('path')
+        if path and path ~= '' then
+            local dir = LrPathUtils.parent(path)
+            if dir then
+                for seg in dir:gmatch('[^\\/]+') do
+                    table.insert(firstPhotoSegments, seg)
+                end
+            end
+        end
+    end)
+
     -- Crear propiedades observables para el checkbox
     local props = LrBinding.makePropertyTable(context)
     props.onlyToLightbox = false
+    props.mirrorFolderStructure = false
+    props.mirrorRootIndex = 1
     props.photoCount = #photos
     
     -- Construir el grid con miniaturas
@@ -219,6 +235,33 @@ LrFunctionContext.callWithContext('showDialog', function(context)
             value = LrView.bind('onlyToLightbox'),
         },
 
+        -- Checkbox para replicar la estructura de carpetas de Lightroom
+        -- como collections en Photoreka.
+        f:checkbox {
+            title = 'Mirror folder structure (replicate Lightroom folders as Photoreka collections)',
+            value = LrView.bind('mirrorFolderStructure'),
+        },
+
+        f:row {
+            enabled = LrView.bind('mirrorFolderStructure'),
+            spacing = f:label_spacing(),
+            f:static_text {
+                title = 'Folders root:',
+                enabled = LrView.bind('mirrorFolderStructure'),
+            },
+            f:popup_menu {
+                items = (function()
+                    local items = {}
+                    for i, seg in ipairs(firstPhotoSegments) do
+                        table.insert(items, { title = seg, value = i })
+                    end
+                    return items
+                end)(),
+                value = LrView.bind('mirrorRootIndex'),
+                enabled = LrView.bind('mirrorFolderStructure'),
+            },
+        },
+
     }
     
     -- Mostrar el diálogo con botón "Procesar"
@@ -233,9 +276,12 @@ LrFunctionContext.callWithContext('showDialog', function(context)
     if result == 'ok' then
         -- Capturar el valor del checkbox antes de salir del contexto
         local onlyToLightbox = props.onlyToLightbox
+        local mirrorFolderStructure = props.mirrorFolderStructure
+        local mirrorRootSegment = firstPhotoSegments[props.mirrorRootIndex] or firstPhotoSegments[1]
         
         -- Ejecutar exportación y envío en async task
         LrTasks.startAsyncTask(function()
+            log:info('mirrorFolderStructure captured value = ' .. tostring(mirrorFolderStructure))
             -- PRIMERO: Verificar autenticación antes de iniciar la exportación
             log:info("Usuario pulsó Procesar, verificando autenticación...")
             local token = AuthService.ensureAuthenticated()
@@ -298,6 +344,42 @@ LrFunctionContext.callWithContext('showDialog', function(context)
                         type = "lightroom",
                         uniqueId = uniqueId
                     }
+
+                    if mirrorFolderStructure then
+                        catalog:withReadAccessDo(function()
+                            local photoPath = photo:getRawMetadata('path')
+                            if photoPath and photoPath ~= '' then
+                                local dir = LrPathUtils.parent(photoPath)
+                                if dir then
+                                    local segments = {}
+                                    for seg in dir:gmatch('[^\\/]+') do
+                                        table.insert(segments, seg)
+                                    end
+                                    -- Find the root segment and exclude it: collections start AFTER it
+                                    -- Case-insensitive match to handle Windows/macOS path casing
+                                    local startIdx = #segments + 1
+                                    if mirrorRootSegment then
+                                        local rootLower = mirrorRootSegment:lower()
+                                        for idx, seg in ipairs(segments) do
+                                            if seg:lower() == rootLower then
+                                                startIdx = idx + 1
+                                                break
+                                            end
+                                        end
+                                    end
+                                    local trimmed = {}
+                                    for idx = startIdx, #segments do
+                                        table.insert(trimmed, segments[idx])
+                                    end
+                                    if #trimmed > 0 then
+                                        sourceData.folderPath = trimmed
+                                        sourceData.folderFullPath = segments  -- full path for collection description
+                                    end
+                                end
+                            end
+                        end)
+                    end
+
                     table.insert(sourceDataList, sourceData)
                     
                     -- Extraer EXIF reales de la foto

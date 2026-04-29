@@ -356,26 +356,22 @@ function ApiService.uploadPhotos(photoData, progressCallback, onlyToLightbox)
     local thumbPhotos = photoData.thumbPhotos or {}
     local exifDataList = photoData.exifDataList or {}
     local sourceDataList = photoData.sourceDataList or {}
-    local totalPhotos = #fullPhotos
+    -- totalCount es el número original de fotos antes de filtrar skips (videos, etc.)
+    local totalPhotos = photoData.totalCount or #fullPhotos
     
     log:info("========================================")
     log:info("INICIANDO SUBIDA DE FOTOS CON CONCURRENCIA")
     log:info("Total fotos: " .. tostring(totalPhotos))
-    log:info("Full photos: " .. tostring(#fullPhotos))
-    log:info("Thumb photos: " .. tostring(#thumbPhotos))
+    log:info("Full photos (con posibles skips): " .. tostring(totalPhotos))
+    log:info("Thumb photos (con posibles skips): " .. tostring(totalPhotos))
     log:info("EXIF data: " .. tostring(#exifDataList))
     log:info("Only to Lightbox: " .. tostring(onlyToLightbox))
     log:info("Concurrent uploads: " .. tostring(Config.CONCURRENT_UPLOADS))
     log:info("========================================")
     
-    -- Validar que los arrays tengan la misma longitud
-    if #thumbPhotos ~= totalPhotos then
-        log:error("ERROR: Mismatch en cantidad de fotos!")
-        error("Mismatch: fullPhotos and thumbPhotos must have the same length")
-    end
-    
     local successfulUploads = {}
     local failedUploads = {}
+    local skippedUploads = 0
     
     -- Crear array de tareas (una por foto)
     local tasks = {}
@@ -386,6 +382,12 @@ function ApiService.uploadPhotos(photoData, progressCallback, onlyToLightbox)
             log:info(string.format("PROCESANDO FOTO %d de %d", i, totalPhotos))
             log:info("========================================")
             
+            -- Saltar fotos que no pudieron exportarse (ej: videos)
+            if not fullPhotos[i] or not thumbPhotos[i] then
+                log:warn(string.format("Photo %d skipped (no export path, possibly a video)", i))
+                return nil
+            end
+
             -- Obtener EXIF data (ya extraída en Main.lua)
             local exifData = exifDataList[i]
             if not exifData then
@@ -420,9 +422,12 @@ function ApiService.uploadPhotos(photoData, progressCallback, onlyToLightbox)
     
     -- Procesar resultados
     for i, result in ipairs(results) do
-        if result.success then
+        if result.success and result.result then
             log:info("✓ Foto " .. tostring(i) .. " subida exitosamente")
             table.insert(successfulUploads, result.result)
+        elseif result.success then
+            skippedUploads = skippedUploads + 1
+            log:info("- Foto " .. tostring(i) .. " omitida del upload")
         else
             log:error("✗ Foto " .. tostring(i) .. " FALLÓ: " .. tostring(result.result))
             table.insert(failedUploads, {
@@ -437,6 +442,7 @@ function ApiService.uploadPhotos(photoData, progressCallback, onlyToLightbox)
     log:info("========================================")
     log:info("RESUMEN DE SUBIDA")
     log:info("Exitosas: " .. tostring(#successfulUploads))
+    log:info("Omitidas: " .. tostring(skippedUploads))
     log:info("Fallidas: " .. tostring(#failedUploads))
     log:info("========================================")
     
