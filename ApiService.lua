@@ -533,6 +533,13 @@ function ApiService.search(query, searchMode)
         
         if statusCode and (statusCode < 200 or statusCode >= 300) then
             log:error("Search API error " .. tostring(statusCode) .. ": " .. tostring(response))
+            -- Detectar error de créditos insuficientes
+            if statusCode == 402 then
+                local ok, errData = pcall(function() return JSON.decode(response) end)
+                if ok and errData and errData.code == "INSUFFICIENT_CREDITS" then
+                    error("INSUFFICIENT_CREDITS")
+                end
+            end
             error(string.format("Search API returned error %d: %s", statusCode, response or "unknown error"))
         end
     end
@@ -542,6 +549,50 @@ function ApiService.search(query, searchMode)
     log:info("Resultados obtenidos: " .. tostring(#(searchResults.results or {})) .. " fotos")
     
     return searchResults
+end
+
+-- Obtiene los datos de uso del usuario autenticado desde /api/usage
+-- Retorna: tabla con {creditsUsed, photosLimit, creditsAvailable, analyzedPhotosUsed,
+--          analyzedPhotosLimit, photosUsage, analyzedPhotosRemaining} o genera error
+function ApiService.getUsage()
+    local token = getAuthToken()
+
+    local url = Config.API_BASE_URL .. "/api/usage"
+
+    log:info("Fetching usage data from: " .. url)
+
+    local headers = {
+        { field = "Authorization", value = "Bearer " .. token },
+    }
+
+    local response, responseHeaders = LrHttp.get(url, headers)
+
+    if not response then
+        log:error("ERROR: No response from usage API")
+        error("Failed to get usage data from server")
+    end
+
+    if responseHeaders and responseHeaders.status then
+        local statusCode = tonumber(responseHeaders.status)
+        if statusCode and (statusCode < 200 or statusCode >= 300) then
+            log:error("Usage API error " .. tostring(statusCode) .. ": " .. tostring(response))
+            error(string.format("Usage API returned error %d", statusCode))
+        end
+    end
+
+    local responseData = JSON.decode(response)
+    if responseData and responseData.data then
+        log:info(string.format(
+            "Usage fetched: creditsUsed=%d analyzedPhotosRemaining=%d photosLimit=%d photosUsage=%d",
+            responseData.data.creditsUsed or 0,
+            responseData.data.analyzedPhotosRemaining or 0,
+            responseData.data.photosLimit or 0,
+            responseData.data.photosUsage or 0
+        ))
+        return responseData.data
+    end
+
+    error("Invalid usage response format")
 end
 
 -- Crea un token handoff efímero para exportar fotos a Photoreka

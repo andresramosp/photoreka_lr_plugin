@@ -385,7 +385,24 @@ LrFunctionContext.callWithContext('showSearchDialog', function(context)
                 )
                 return
             end
-            
+
+            -- Verificar créditos: se necesitan al menos 2 fotos analizadas para buscar
+            local creditsOk, creditsResult = LrTasks.pcall(function()
+                return ApiService.getUsage()
+            end)
+            if creditsOk and creditsResult then
+                if (creditsResult.creditsUsed or 0) < 2 then
+                    LrDialogs.message(
+                        'Photoreka Search',
+                        'Insufficient credits to perform search.',
+                        'info'
+                    )
+                    return
+                end
+            else
+                log:warn("Could not verify credits before search: " .. tostring(creditsResult))
+            end
+
             -- Realizar búsqueda
             local searchResults = nil
             
@@ -440,11 +457,19 @@ LrFunctionContext.callWithContext('showSearchDialog', function(context)
                 
                 if not apiSuccess then
                     log:error("Error en búsqueda: " .. tostring(apiResult))
-                    LrDialogs.message(
-                        'Photoreka Search',
-                        'Search failed: ' .. tostring(apiResult),
-                        'error'
-                    )
+                    if tostring(apiResult):find("INSUFFICIENT_CREDITS") then
+                        LrDialogs.message(
+                            'Photoreka Search',
+                            'You have no credits remaining.\n\nPlease purchase more credits at app.photoreka.com to continue searching.',
+                            'warning'
+                        )
+                    else
+                        LrDialogs.message(
+                            'Photoreka Search',
+                            'Search failed. Please try again later.',
+                            'error'
+                        )
+                    end
                     return
                 end
                 

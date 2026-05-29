@@ -6,6 +6,7 @@ local LrBinding = import 'LrBinding'
 local LrFunctionContext = import 'LrFunctionContext'
 local LrPrefs = import 'LrPrefs'
 local LrLogger = import 'LrLogger'
+local LrTasks = import 'LrTasks'
 
 local JSON = require 'JSON'
 local Config = require 'Config'
@@ -181,10 +182,195 @@ function AuthService.login(email, password)
     }
 end
 
+-- ─── Device Authorization Flow (Google / browser-based login) ────────────────
+
+-- Crea una sesión pendiente en el backend para el flujo de login con navegador.
+-- Retorna: tabla con {sessionId, expiresInSeconds} o nil en caso de error
+local function createDeviceSession()
+    local url = Config.API_BASE_URL .. '/api/auth_lr/create-device-session'
+    local response, headers = LrHttp.post(url, '{}', {
+        { field = 'Content-Type', value = 'application/json' }
+    })
+
+    if not response then
+        log:error("createDeviceSession: no response from server")
+        return nil
+    end
+
+    local statusCode = 200
+    if headers and headers.status then
+        statusCode = tonumber(headers.status) or 200
+    end
+
+    if statusCode < 200 or statusCode >= 300 then
+        log:error("createDeviceSession: server error " .. tostring(statusCode))
+        return nil
+    end
+
+    local ok, data = pcall(function() return JSON.decode(response) end)
+    if not ok or not data or not data.sessionId then
+        log:error("createDeviceSession: invalid response")
+        return nil
+    end
+
+    log:info("Device session created: " .. data.sessionId)
+    return data
+end
+
+-- Consulta el backend para ver si el usuario ya completó el login en el navegador.
+-- Retorna: tabla con {status, token, user} o nil en caso de error de red
+local function pollDeviceSession(sessionId)
+    local url = Config.API_BASE_URL .. '/api/auth_lr/poll-device-session?sessionId=' .. sessionId
+    local response, headers = LrHttp.get(url, {})
+
+    if not response then
+        log:warn("pollDeviceSession: no response")
+        return nil
+    end
+
+    local statusCode = 200
+    if headers and headers.status then
+        statusCode = tonumber(headers.status) or 200
+    end
+
+    if statusCode < 200 or statusCode >= 300 then
+        return nil
+    end
+
+    local ok, data = pcall(function() return JSON.decode(response) end)
+    if not ok or not data then return nil end
+
+    return data
+end
+
+-- Abre el navegador para que el usuario se autentique (Google u otro método web).
+-- El plugin muestra un diálogo de espera y sondea el backend hasta obtener el token.
+-- Retorna: token string o nil si el usuario cancela o hay error
+function AuthService.loginWithBrowser()
+    -- 1. Crear sesión pendiente
+    local sessionData = createDeviceSession()
+    if not sessionData then
+        LrDialogs.message(
+            'Connection error',
+            'Could not contact the Photoreka server. Please check your internet connection.',
+            'critical'
+        )
+        return nil
+    end
+
+    -- 2. Abrir navegador en la página de autenticación
+    local loginUrl = Config.APP_BASE_URL .. '/lr-auth?session=' .. sessionData.sessionId
+    log:info("Opening browser for device auth: " .. loginUrl)
+    LrHttp.openUrlInBrowser(loginUrl)
+
+    -- 3. Mostrar diálogo de espera
+    local f = LrView.osFactory()
+    local dialogContent = f:column {
+        spacing = f:control_spacing(),
+
+        f:row {
+            fill_horizontal = 1,
+            f:spacer { fill_horizontal = 1 },
+            f:picture {
+                value = _PLUGIN.path .. '/logo_full.png',
+                height = 70,
+            },
+            f:spacer { fill_horizontal = 1 },
+        },
+
+        f:spacer { height = 8 },
+
+        f:static_text {
+            title = 'Sign in with Google',
+            font = '<system/bold>',
+        },
+
+        f:separator { fill_horizontal = 1 },
+
+        f:spacer { height = 8 },
+
+        f:static_text {
+            title = 'A browser window has been opened so you can sign in\nwith your Google account.\n\nOnce you have completed the sign-in, click "Done".',
+            width = 360,
+            height_in_lines = 4,
+        },
+
+        f:spacer { height = 6 },
+
+        f:static_text {
+            title = 'The session link expires in 10 minutes.',
+            font = '<system/small>',
+            text_color = LrView.kLabelColor,
+        },
+    }
+
+    local result = LrDialogs.presentModalDialog({
+        title = 'Browser Login',
+        contents = dialogContent,
+        actionVerb = 'Done',
+        cancelVerb = 'Cancel',
+    })
+
+    if result ~= 'ok' then
+        log:info("loginWithBrowser: user cancelled")
+        return nil
+    end
+
+    -- 4. Sondear el backend (hasta 12 intentos ≈ ~12 s con latencia de red)
+    log:info("loginWithBrowser: polling for token...")
+    local token = nil
+    for i = 1, 12 do
+        local pollResult = pollDeviceSession(sessionData.sessionId)
+        if pollResult then
+            if pollResult.status == 'completed' then
+                storeToken(pollResult.token, pollResult.user)
+                token = pollResult.token
+                log:info("loginWithBrowser: token received on attempt " .. tostring(i))
+                break
+            elseif pollResult.status == 'expired' then
+                log:warn("loginWithBrowser: session expired")
+                break
+            end
+        end
+        -- Small yield between retries (only available inside LrTasks context)
+        if i < 12 then
+            local ok = pcall(function() LrTasks.sleep(1) end)
+            if not ok then break end
+        end
+    end
+
+    if not token then
+        local retry = LrDialogs.confirm(
+            'Login not detected',
+            'The sign-in could not be confirmed. Did you complete the Google login in the browser?\n\nClick "Try Again" to check once more.',
+            'Try Again',
+            'Cancel'
+        )
+        if retry == 'ok' then
+            -- One last attempt
+            local pollResult = pollDeviceSession(sessionData.sessionId)
+            if pollResult and pollResult.status == 'completed' then
+                storeToken(pollResult.token, pollResult.user)
+                token = pollResult.token
+            else
+                LrDialogs.message(
+                    'Login failed',
+                    'Could not confirm your sign-in. Please try again from the beginning.',
+                    'critical'
+                )
+            end
+        end
+    end
+
+    return token
+end
+
+-- ─────────────────────────────────────────────────────────────────────────────
+
 -- Muestra el diálogo de login y realiza la autenticación
 -- Retorna: token string o nil si el usuario cancela
 function AuthService.showLoginDialog()
-    local LrTasks = import 'LrTasks'
+    -- LrTasks already imported at top of file
     
     return LrFunctionContext.callWithContext('loginDialog', function(context)
         local f = LrView.osFactory()
@@ -196,6 +382,9 @@ function AuthService.showLoginDialog()
         properties.password = ''
         properties.errorMessage = ''
         properties.loginInProgress = false
+
+        -- Track if Google login was chosen (set from inside the button action)
+        local googleLoginRequested = false
         
         local dialogContent = f:column {
             bind_to_object = properties,  -- CLAVE: enlazar el dialog a properties
@@ -320,6 +509,37 @@ function AuthService.showLoginDialog()
                 
                 f:spacer { fill_horizontal = 1 },
             },
+
+            f:separator { fill_horizontal = 1 },
+
+            f:spacer { height = 4 },
+
+            -- Botón "Sign in with Google" con icono
+            f:row {
+                fill_horizontal = 1,
+
+                f:spacer { fill_horizontal = 1 },
+
+                f:picture {
+                    value = _PLUGIN.path .. '/google_icon.png',
+                    width = 18,
+                    height = 18,
+                },
+
+                f:spacer { width = 6 },
+
+                f:push_button {
+                    title = 'Sign in with Google',
+                    action = function(button)
+                        googleLoginRequested = true
+                        LrDialogs.stopModalWithResult(button, 'ok')
+                    end,
+                },
+
+                f:spacer { fill_horizontal = 1 },
+            },
+
+            f:spacer { height = 2 },
             
             -- Info de usuario guardado
             f:row {
@@ -350,6 +570,11 @@ function AuthService.showLoginDialog()
                 },
             },
         })
+
+        -- Google login button was clicked inside the dialog
+        if result == 'ok' and googleLoginRequested then
+            return AuthService.loginWithBrowser()
+        end
         
         if result == 'ok' then
             -- El diálogo se cerró con OK, hacer login ahora con los valores que tenemos

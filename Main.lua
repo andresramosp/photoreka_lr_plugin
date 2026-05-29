@@ -149,12 +149,41 @@ LrFunctionContext.callWithContext('showDialog', function(context)
         end
     end)
 
+    -- Obtener datos de uso (best effort, no bloquear si falla o no hay token aún)
+    local usageData = nil
+    local storedToken = AuthService.getStoredToken()
+    if storedToken then
+        local usageFetchOk, usageFetchResult = LrTasks.pcall(function()
+            return ApiService.getUsage()
+        end)
+        if usageFetchOk and usageFetchResult then
+            usageData = usageFetchResult
+        else
+            log:warn("Could not pre-fetch usage data: " .. tostring(usageFetchResult))
+        end
+    end
+
+    local function computeAvailableText(onlyToLightbox)
+        if not usageData then return '' end
+        if onlyToLightbox then
+            local available = math.max(0, (usageData.photosLimit or 0) - (usageData.photosUsage or 0))
+            return string.format('Lightbox uploads available: %d', available)
+        else
+            return string.format('Photos available for analysis: %d', usageData.analyzedPhotosRemaining or 0)
+        end
+    end
+
     -- Crear propiedades observables para el checkbox
     local props = LrBinding.makePropertyTable(context)
     props.onlyToLightbox = false
     props.mirrorFolderStructure = false
     props.mirrorRootIndex = 1
     props.photoCount = #photos
+    props.availableText = computeAvailableText(false)
+
+    props:addObserver('onlyToLightbox', function(properties, key, newValue)
+        properties.availableText = computeAvailableText(newValue)
+    end)
     
     -- Construir el grid con miniaturas
     local thumbnailRows = {}
@@ -228,7 +257,21 @@ LrFunctionContext.callWithContext('showDialog', function(context)
         },
         
         f:separator { fill_horizontal = 1 },
-        
+
+        -- Disponibilidad de uso (se actualiza al cambiar el checkbox)
+        f:row {
+            fill_horizontal = 1,
+            visible = LrView.bind {
+                key = 'availableText',
+                transform = function(value) return value and value ~= '' end,
+            },
+            f:static_text {
+                title = LrView.bind('availableText'),
+                font = '<system/small>',
+                text_color = LrView.kLabelColor,
+            },
+        },
+
         -- Checkbox para modo "Only to Lightbox"
         f:checkbox {
             title = 'Only to Lightbox (check for filtering or reviewing duplicates)',
@@ -295,7 +338,44 @@ LrFunctionContext.callWithContext('showDialog', function(context)
                 )
                 return
             end
-            
+
+            -- Verificar límites de uso con datos frescos de la API
+            local currentUsageOk, currentUsage = LrTasks.pcall(function()
+                return ApiService.getUsage()
+            end)
+            if currentUsageOk and currentUsage then
+                local photoCount = #photos
+                if onlyToLightbox then
+                    local available = math.max(0, (currentUsage.photosLimit or 0) - (currentUsage.photosUsage or 0))
+                    if photoCount > available then
+                        LrDialogs.message(
+                            'Analyze Photos',
+                            string.format(
+                                'Not enough upload slots. You have %d available but selected %d photos.',
+                                available, photoCount
+                            ),
+                            'warning'
+                        )
+                        return
+                    end
+                else
+                    local available = currentUsage.analyzedPhotosRemaining or 0
+                    if photoCount > available then
+                        LrDialogs.message(
+                            'Analyze Photos',
+                            string.format(
+                                'Not enough analysis slots. You have %d available but selected %d photos.\n\nTip: Use "Only to Lightbox" to upload without analysis.',
+                                available, photoCount
+                            ),
+                            'warning'
+                        )
+                        return
+                    end
+                end
+            else
+                log:warn("Could not verify usage limits before export: " .. tostring(currentUsage))
+            end
+
             log:info("Autenticación exitosa, iniciando exportación...")
             
             -- Crear carpeta temporal
@@ -539,10 +619,10 @@ LrFunctionContext.callWithContext('showDialog', function(context)
                 local linkText, linkPath
                 if onlyToLightbox then
                     linkText = '🔎 Review your photos here before processing'
-                    linkPath = '/sync-area#upload'
+                    linkPath = '/import-area#upload'
                 else
                     linkText = '🔎 Monitor processing here'
-                    linkPath = '/sync-area#processing'
+                    linkPath = '/import-area#processing'
                 end
                 
                 local handoffToken = ApiService.createHandoff()
