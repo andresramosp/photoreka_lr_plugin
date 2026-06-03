@@ -152,6 +152,11 @@ local function requestUploadUrls(originalName, exifData, sourceData)
         if statusCode and (statusCode < 200 or statusCode >= 300) then
             log:error("Server error " .. tostring(statusCode) .. ": " .. tostring(response))
             
+            -- Token rechazado: invalidar caché para forzar re-validación en el próximo intento
+            if statusCode == 401 then
+                AuthService.invalidateToken()
+            end
+
             -- Detectar error de email no confirmado
             if statusCode == 403 and response then
                 local success, errorData = pcall(function() return JSON.decode(response) end)
@@ -175,6 +180,39 @@ local function requestUploadUrls(originalName, exifData, sourceData)
     log:info("JSON decodificado OK")
     
     return responseData
+end
+
+-- Confirma al backend que ambos objetos (main + thumbnail) llegaron a R2.
+-- Sin esta confirmación, el barrido de huérfanas del servidor eliminará la foto.
+-- Parámetros:
+--   photoId: ID de la foto devuelto por requestUploadUrls
+local function confirmUpload(photoId)
+    local token = getAuthToken()
+    local url = Config.API_BASE_URL .. "/api/catalog/confirmUpload"
+
+    local payload = { photoIds = { photoId } }
+    local headers = {
+        { field = "Authorization", value = "Bearer " .. token },
+        { field = "Content-Type", value = "application/json" }
+    }
+    local body = JSON.encode(payload)
+
+    local response, responseHeaders = LrHttp.post(url, body, headers)
+
+    if not response then
+        log:error("ERROR: No response from confirmUpload")
+        error("Failed to confirm upload for photo " .. tostring(photoId))
+    end
+
+    if responseHeaders and responseHeaders.status then
+        local statusCode = tonumber(responseHeaders.status)
+        if statusCode and (statusCode < 200 or statusCode >= 300) then
+            log:error("confirmUpload error " .. tostring(statusCode) .. ": " .. tostring(response))
+            error(string.format("confirmUpload returned error %d", statusCode))
+        end
+    end
+
+    log:info("Confirmación de subida OK para foto " .. tostring(photoId))
 end
 
 -- Procesa y sube una foto individual (main + thumbnail)
@@ -228,6 +266,10 @@ local function processAndUploadPhoto(mainImagePath, thumbnailPath, exifData, sou
     
     log:info("Thumbnail subido OK")
     log:info("===== FOTO COMPLETADA =====")
+    
+    -- 4. Confirmar al backend que ambos objetos llegaron a R2
+    log:info("PASO 4: Confirmando subida...")
+    confirmUpload(uploadData.photo.id)
     
     return uploadData.photo
 end
@@ -576,6 +618,9 @@ function ApiService.getUsage()
         local statusCode = tonumber(responseHeaders.status)
         if statusCode and (statusCode < 200 or statusCode >= 300) then
             log:error("Usage API error " .. tostring(statusCode) .. ": " .. tostring(response))
+            if statusCode == 401 then
+                AuthService.invalidateToken()
+            end
             error(string.format("Usage API returned error %d", statusCode))
         end
     end
