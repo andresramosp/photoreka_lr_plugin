@@ -21,9 +21,11 @@ log:enable("logfile")
 local TOKEN_PREF_KEY = 'photoreka_auth_token'
 local USER_EMAIL_PREF_KEY = 'photoreka_user_email'
 local USER_NAME_PREF_KEY = 'photoreka_user_name'
--- Cache de validación de sesión: true cuando el token ya fue verificado contra
--- el servidor en esta sesión. Se resetea al cambiar/borrar el token.
-local _tokenValidated = false
+-- Timestamp (os.time) de la última validación contra el servidor.
+-- Se persiste en prefs para sobrevivir recargas del módulo entre invocaciones de menú.
+local VALIDATED_AT_PREF_KEY = 'photoreka_token_validated_at'
+-- Tiempo durante el cual confiamos en un token ya validado sin re-pegarle al servidor.
+local VALIDATION_TTL_SECONDS = 60 * 60 * 24 * 7
 log:info("AuthService cargado")
 
 -- Obtiene el token almacenado en las preferencias
@@ -55,7 +57,7 @@ local function storeToken(token, userData)
     end
     
     -- Token recién obtenido del servidor: marcarlo como validado sin HTTP extra.
-    _tokenValidated = true
+    prefs[VALIDATED_AT_PREF_KEY] = os.time()
     log:info("Token y datos de usuario guardados en preferencias")
 end
 
@@ -82,14 +84,16 @@ function AuthService.clearStoredToken()
     prefs[TOKEN_PREF_KEY] = nil
     prefs[USER_EMAIL_PREF_KEY] = nil
     prefs[USER_NAME_PREF_KEY] = nil
-    _tokenValidated = false
+    prefs[VALIDATED_AT_PREF_KEY] = nil
     log:info("Token y datos de usuario eliminados de preferencias")
 end
 
--- Invalida la cache de validación sin borrar el token.
--- Llamar cuando una petición API devuelve 401, para forzar re-validación.
+-- Invalida la marca de validación sin borrar el token.
+-- Llamar cuando una petición API devuelve 401, para forzar re-validación
+-- (o login) en la siguiente llamada a ensureAuthenticated.
 function AuthService.invalidateToken()
-    _tokenValidated = false
+    local prefs = LrPrefs.prefsForPlugin()
+    prefs[VALIDATED_AT_PREF_KEY] = nil
     log:info('Token marcado como no validado (posible 401 recibido)')
 end
 
@@ -618,56 +622,94 @@ function AuthService.showLoginDialog()
     end)
 end
 
--- Valida si hay un token disponible, si no, muestra el diálogo de login
--- Retorna: token string o nil si el usuario cancela
--- Valida el token contra el servidor de forma silente.
--- Retorna: true si es válido, false si ha caducado o hay error de red.
-local function isTokenValid(token)
+-- Valida un token contra el servidor.
+-- Retorna uno de los siguientes strings:
+--   'valid'   → el servidor aceptó el token (2xx)
+--   'invalid' → el servidor rechazó el token (401 o 403): hay que re-loguear
+--   'unknown' → no pudimos determinarlo (red caída, 5xx, headers vacíos):
+--               se asume válido para no destruir la sesión por un fallo transitorio
+local function checkTokenWithServer(token)
     local url = Config.API_BASE_URL .. '/api/usage'
     local headers = { { field = 'Authorization', value = 'Bearer ' .. token } }
     local ok, response, responseHeaders = pcall(function()
         return LrHttp.get(url, headers)
     end)
-    if not ok or not responseHeaders then
-        -- Server unreachable: fail closed so the user is asked to log in again.
-        -- (A reachable server that rejects the token also falls through to the
-        --  status-code check below, so this branch is truly "no response at all".)
-        log:warn('isTokenValid: server unreachable or no response, treating token as invalid')
-        return false
+
+    if not ok then
+        log:warn('checkTokenWithServer: pcall failed: ' .. tostring(response))
+        return 'unknown'
     end
+    if not responseHeaders or not responseHeaders.status then
+        log:warn('checkTokenWithServer: no response headers (network issue?)')
+        return 'unknown'
+    end
+
     local statusCode = tonumber(responseHeaders.status) or 0
     if statusCode >= 200 and statusCode < 300 then
-        log:info('isTokenValid: token accepted by server (' .. tostring(statusCode) .. ')')
-        return true
+        log:info('checkTokenWithServer: token accepted (' .. tostring(statusCode) .. ')')
+        return 'valid'
     end
-    log:info('isTokenValid: token rejected by server (' .. tostring(statusCode) .. ')')
-    return false
+    if statusCode == 401 or statusCode == 403 then
+        log:info('checkTokenWithServer: token rejected (' .. tostring(statusCode) .. ')')
+        return 'invalid'
+    end
+    -- Cualquier otro código (5xx, 0, etc.) lo tratamos como transitorio.
+    log:warn('checkTokenWithServer: non-auth error (' .. tostring(statusCode) .. '), treating as unknown')
+    return 'unknown'
 end
 
+-- Marca el token como validado ahora mismo.
+local function markValidated()
+    local prefs = LrPrefs.prefsForPlugin()
+    prefs[VALIDATED_AT_PREF_KEY] = os.time()
+end
+
+-- True si el token guardado fue validado dentro del TTL.
+local function isValidationFresh()
+    local prefs = LrPrefs.prefsForPlugin()
+    local validatedAt = tonumber(prefs[VALIDATED_AT_PREF_KEY])
+    if not validatedAt then return false end
+    local age = os.time() - validatedAt
+    return age >= 0 and age < VALIDATION_TTL_SECONDS
+end
+
+-- Garantiza que tenemos un token utilizable; muestra el diálogo de login si no.
+-- Reglas:
+--   1. Si no hay token guardado → mostrar login.
+--   2. Si hay token y la última validación está dentro del TTL → reutilizar sin HTTP.
+--   3. Si hay token pero la validación está stale → pegarle al servidor:
+--        - 'valid'   → refrescar timestamp y devolver el token.
+--        - 'invalid' → borrar token y mostrar login.
+--        - 'unknown' → devolver el token igualmente. Si realmente está caducado,
+--                       la próxima llamada API real recibirá 401 y
+--                       invalidateToken() forzará una re-validación.
+-- Retorna: token string o nil si el usuario cancela el login.
 function AuthService.ensureAuthenticated()
-    -- Primero intentar obtener token guardado
     local token = AuthService.getStoredToken()
 
-    if token then
-        if _tokenValidated then
-            -- Ya validado en esta sesión: reutilizar sin HTTP extra.
-            log:info('Token en caché, reutilizando sin re-validar')
-            return token
-        end
-
-        -- Primera vez que vemos este token en la sesión: validar contra el servidor.
-        if isTokenValid(token) then
-            log:info('Token existente encontrado y validado')
-            _tokenValidated = true
-            return token
-        end
-        -- Token rechazado: limpiar y pedir login
-        log:info('Token rechazado por el servidor, solicitando nuevo login')
-        AuthService.clearStoredToken()  -- también resetea _tokenValidated
-    else
-        log:info('No hay token, mostrando diálogo de login')
+    if not token then
+        log:info('ensureAuthenticated: no token, mostrando login')
+        return AuthService.showLoginDialog()
     end
 
+    if isValidationFresh() then
+        log:info('ensureAuthenticated: validación fresca, reutilizando token sin HTTP')
+        return token
+    end
+
+    local status = checkTokenWithServer(token)
+    if status == 'valid' then
+        markValidated()
+        return token
+    end
+    if status == 'unknown' then
+        log:info('ensureAuthenticated: validación inconcluyente, reutilizando token (se re-validará si una API responde 401)')
+        return token
+    end
+
+    -- 'invalid'
+    log:info('ensureAuthenticated: token rechazado por el servidor, requiere nuevo login')
+    AuthService.clearStoredToken()
     return AuthService.showLoginDialog()
 end
 
