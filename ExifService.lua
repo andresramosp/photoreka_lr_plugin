@@ -1,5 +1,6 @@
 -- ExifService.lua - Servicio de extracción de metadatos EXIF
 local LrLogger = import 'LrLogger'
+local LrTasks = import 'LrTasks'
 
 local ExifService = {}
 
@@ -84,7 +85,7 @@ end
 -- Función para extraer un valor usando múltiples claves posibles (FORMATTED)
 local function extractFormattedValue(photo, possibleKeys, logPrefix)
     for _, key in ipairs(possibleKeys) do
-        local success, value = pcall(function()
+        local success, value = LrTasks.pcall(function()
             return photo:getFormattedMetadata(key)
         end)
         
