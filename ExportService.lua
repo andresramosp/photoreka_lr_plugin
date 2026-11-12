@@ -12,10 +12,17 @@ local ExportService = {}
 local log = LrLogger('PhotorekaPlugin')
 log:enable("logfile")
 
--- Crea una carpeta temporal para las exportaciones
+-- Contador de sesión para garantizar nombres únicos: os.time() sólo tiene
+-- resolución de 1 segundo, así que dos llamadas en el mismo segundo generarían
+-- la MISMA carpeta y borrar una (deleteTempFolder) destruiría la otra.
+local tempFolderCounter = 0
+
+-- Crea una carpeta temporal para las exportaciones (nombre garantizado único)
 function ExportService.createTempFolder()
+    tempFolderCounter = tempFolderCounter + 1
     local tempFolder = LrPathUtils.getStandardFilePath('temp')
-    local exportFolder = LrPathUtils.child(tempFolder, 'PhotorekaExport_' .. os.time())
+    local uniqueName = string.format('PhotorekaExport_%d_%d', os.time(), tempFolderCounter)
+    local exportFolder = LrPathUtils.child(tempFolder, uniqueName)
     LrFileUtils.createDirectory(exportFolder)
     return exportFolder
 end
@@ -190,6 +197,40 @@ local function exportVariantPhotos(photos, targetPaths, variantConfig, onPhotoEx
             onPhotoExported(i)
         end
     end
+end
+
+-- Exporta una muestra de fotos a una versión reducida para el chequeo de
+-- Safe Search (moderación de contenido previa a la exportación real).
+-- Parámetros:
+--   photos: array de fotos a exportar
+--   exportFolder: carpeta de destino temporal
+-- Retorna: array de rutas a los archivos exportados. Puede contener menos
+--   elementos que `photos` si alguna exportación individual falla.
+function ExportService.exportSamplesForSafeSearch(photos, exportFolder)
+    LrFileUtils.createDirectory(exportFolder)
+
+    local targetPaths = {}
+    local sampleVariant = {
+        label = 'SafeSearch',
+        maxWidth = Config.SAFE_SEARCH_MAX_WIDTH,
+        maxHeight = Config.SAFE_SEARCH_MAX_WIDTH,
+        maxSizeBytes = Config.SAFE_SEARCH_MAX_SIZE_BYTES,
+        getFolder = function(i)
+            return LrPathUtils.child(exportFolder, string.format('sample_%04d', i))
+        end,
+    }
+
+    exportVariantPhotos(photos, targetPaths, sampleVariant, nil)
+
+    -- Compactar el array saltando las exportaciones fallidas (nil)
+    local paths = {}
+    for i = 1, #photos do
+        if targetPaths[i] then
+            table.insert(paths, targetPaths[i])
+        end
+    end
+
+    return paths
 end
 
 -- Exporta las fotos en dos versiones (full y thumb) y reporta progreso

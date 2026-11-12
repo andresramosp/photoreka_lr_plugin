@@ -41,6 +41,7 @@ local fieldMapping = {
     aperture = {"aperture", "fNumber"},
     shutterSpeed = {"shutterSpeed", "exposureTime"},
     focalLength = {"focalLength"},
+    focalLength35mm = {"focalLength35mm"},
     cameraMake = {"cameraMake", "make"},
     cameraModel = {"cameraModel", "model"},
     lens = {"lens", "lensInfo"},
@@ -182,6 +183,16 @@ function ExifService.extractExifData(photo)
     local focalLength = extractRawValue(rawMetadata, fieldMapping.focalLength, "Distancia focal")
     if focalLength then
         exifData.focalLength = focalLength
+    end
+
+    -- Equivalente en 35 mm: muchas cámaras (casi todas las Canon) no lo graban.
+    -- Si el raw no lo trae se prueba el formatted, que llega como texto ("24 mm").
+    local focalLength35mm = extractRawValue(rawMetadata, fieldMapping.focalLength35mm, "Focal equivalente 35mm (raw)")
+    if not focalLength35mm then
+        focalLength35mm = extractFormattedValue(photo, fieldMapping.focalLength35mm, "Focal equivalente 35mm (formatted)")
+    end
+    if focalLength35mm then
+        exifData.focalLength35mm = focalLength35mm
     end
     
     local aperture = extractRawValue(rawMetadata, fieldMapping.aperture, "Apertura")

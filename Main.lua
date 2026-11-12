@@ -33,6 +33,57 @@ local function getFileName(filePath)
     return nil
 end
 
+-- Muestra el modal de violación de la política de contenido (Safe Search).
+-- Réplica del SafeSearchViolationModal del frontend web.
+local function showSafeSearchViolationDialog(f)
+    local contents = f:column {
+        spacing = f:control_spacing(),
+        fill_horizontal = 1,
+
+        f:row {
+            fill_horizontal = 1,
+            f:spacer { fill_horizontal = 1 },
+            f:picture {
+                value = _PLUGIN.path .. '/logo_full.png',
+                height = 70,
+            },
+            f:spacer { fill_horizontal = 1 },
+        },
+
+        f:spacer { height = 8 },
+
+        f:static_text {
+            title = '⚠ Content Policy Violation',
+            font = '<system/bold>',
+        },
+
+        f:separator { fill_horizontal = 1 },
+
+        f:static_text {
+            title = 'One or more photos in this batch appear to contain content that\n'
+                .. 'violates our policies — including nudity, explicit material, or\n'
+                .. 'violent imagery. The upload has been cancelled and your account\n'
+                .. 'may have been temporarily suspended pending review.',
+            width = 460,
+        },
+
+        f:spacer { height = 6 },
+
+        f:static_text {
+            title = 'If you believe this is a mistake, please contact us at hello@photoreka.com\n'
+                .. 'and we will review your case as soon as possible.',
+            width = 460,
+            font = '<system/small>',
+        },
+    }
+
+    LrDialogs.presentModalDialog({
+        title = 'Content Policy Violation',
+        contents = contents,
+        actionVerb = 'Got it',
+    })
+end
+
 -- Envolver todo en una tarea async para evitar errores de "wait from within a task"
 LrTasks.startAsyncTask(function()
 LrFunctionContext.callWithContext('showDialog', function(context)
@@ -376,24 +427,118 @@ LrFunctionContext.callWithContext('showDialog', function(context)
                 log:warn("Could not verify usage limits before export: " .. tostring(currentUsage))
             end
 
+            -- ============================================================
+            -- SAFE SEARCH PRE-CHECK (réplica del frontend web)
+            -- Antes de exportar, se comprueba una muestra aleatoria del lote
+            -- contra Google Safe Search. Se ejecuta en su PROPIO diálogo de
+            -- progreso (independiente del export normal) para dar feedback al
+            -- usuario durante los segundos que tarda. Si se detecta contenido que
+            -- viola la política → se aborta y se muestra un modal. Si el chequeo
+            -- no está disponible (error) → se continúa con la exportación (fail open).
+            -- ============================================================
+            local safeSearchResult = nil
+            local safeSearchCheckOk = true
+            if Config.SAFE_SEARCH_ENABLED then
+              LrFunctionContext.callWithContext('safeSearchPreflight', function(preflightContext)
+                -- Modal de progreso propio del preflight (separado del export normal).
+                local preflightScope = LrDialogs.showModalProgressDialog({
+                    title = 'Preparing photos...',
+                    functionContext = preflightContext,
+                })
+                preflightScope:setCaption('Preparing export...')
+
+                -- El chequeo es bloqueante y no expone progreso real, así que lo
+                -- corremos en una tarea aparte y animamos una barra "fake" en
+                -- paralelo. La animación avanza de forma lineal hasta ~20s pero se
+                -- capa al 95%: sólo llega al 100% cuando el chequeo real termina.
+                local checkDone = false
+
+                LrTasks.startAsyncTask(function()
+                    safeSearchCheckOk = LrTasks.pcall(function()
+                        local count = #photos
+
+                        -- Tamaño de muestra: ceil(count * ratio), acotado por min/max y total
+                        local sampleCount = math.ceil(count * Config.SAFE_SEARCH_SAMPLE_RATIO)
+                        sampleCount = math.max(Config.SAFE_SEARCH_MIN_SAMPLES, sampleCount)
+                        sampleCount = math.min(Config.SAFE_SEARCH_MAX_SAMPLES, sampleCount)
+                        sampleCount = math.min(count, sampleCount)
+
+                        -- Muestreo aleatorio (Fisher-Yates parcial)
+                        local indices = {}
+                        for i = 1, count do indices[i] = i end
+                        for i = count, 2, -1 do
+                            local j = math.random(i)
+                            indices[i], indices[j] = indices[j], indices[i]
+                        end
+
+                        local samplePhotos = {}
+                        for i = 1, sampleCount do
+                            table.insert(samplePhotos, photos[indices[i]])
+                        end
+
+                        -- Exportar la muestra a tamaño reducido y enviarla al backend.
+                        -- pcall interno para garantizar la limpieza de la carpeta temporal.
+                        local sampleFolder = ExportService.createTempFolder()
+                        local checkOk, checkResultOrErr = LrTasks.pcall(function()
+                            local samplePaths = ExportService.exportSamplesForSafeSearch(samplePhotos, sampleFolder)
+                            return ApiService.checkSafeSearch(samplePaths)
+                        end)
+                        ExportService.deleteTempFolder(sampleFolder)
+
+                        if not checkOk then
+                            error(checkResultOrErr)
+                        end
+                        safeSearchResult = checkResultOrErr
+                    end)
+                    checkDone = true
+                end)
+
+                -- Animación de progreso "fake" mientras el chequeo real corre.
+                local FAKE_DURATION_SEC = 20
+                local STEP_SEC = 0.1
+                local elapsed = 0
+                while not checkDone do
+                    -- Cap al 95% para reservar el salto final al terminar.
+                    local fraction = math.min(0.95, elapsed / FAKE_DURATION_SEC)
+                    preflightScope:setPortionComplete(fraction, 1)
+                    LrTasks.sleep(STEP_SEC)
+                    elapsed = elapsed + STEP_SEC
+                end
+
+                -- Chequeo terminado: completar la barra y cerrar.
+                preflightScope:setPortionComplete(1, 1)
+                preflightScope:done()
+              end)
+            end
+
+            if safeSearchCheckOk and safeSearchResult and safeSearchResult.passed == false then
+                -- Contenido inapropiado detectado: abortar y avisar con modal
+                log:warn("Safe search violation detected, aborting export")
+                showSafeSearchViolationDialog(f)
+                return
+            elseif not safeSearchCheckOk then
+                -- Fail open: el chequeo no está disponible, continuar con la exportación
+                log:warn("Safe search check unavailable, proceeding with export")
+            end
+
             log:info("Autenticación exitosa, iniciando exportación...")
-            
+
             -- Crear carpeta temporal
             local exportFolder = ExportService.createTempFolder()
-            
+
             -- Variable para almacenar resultados
             local uploadResult = nil
-            
+
             LrFunctionContext.callWithContext('exportPhotos', function(exportContext)
                 -- Mostrar barra de progreso
                 local progressScope = LrDialogs.showModalProgressDialog({
                     title = 'Submitting photos to Photoreka server...',
                     functionContext = exportContext,
                 })
-                
+
                 -- FASE 1: Exportación (40% del progreso total)
                 progressScope:setCaption('Step 1/3: Exporting photos...')
-                
+
                 local exportedData = ExportService.exportPhotos(
                     photos,
                     exportFolder,
@@ -491,7 +636,7 @@ LrFunctionContext.callWithContext('showDialog', function(context)
                 progressScope:done()
                 
             end) -- Fin del contexto de progreso
-            
+
             -- Verificar que se haya completado el proceso
             if not uploadResult then
                 log:error("Error: No se obtuvieron resultados del upload")
@@ -630,14 +775,17 @@ LrFunctionContext.callWithContext('showDialog', function(context)
                 if handoffToken then
                     linkUrl = linkUrl .. '?lr_handoff=' .. handoffToken
                 end
-                
+
+                -- Texto visible: solo hasta /import-area (ocultamos hash y token)
+                local linkDisplay = Config.APP_BASE_URL .. '/import-area'
+
                 table.insert(dialogComponents, f:static_text {
                     title = linkText,
                 })
-                
+
                 table.insert(dialogComponents, f:row {
                     f:push_button {
-                        title = linkUrl,
+                        title = linkDisplay,
                         action = function()
                             LrHttp.openUrlInBrowser(linkUrl)
                         end,

@@ -44,6 +44,48 @@ local function readFileAsBinary(filePath)
     return fileData
 end
 
+-- Tabla de caracteres base64 indexada por valor (0–63) para codificación rápida.
+local BASE64_CHARS = {}
+do
+    local alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+    for i = 1, 64 do
+        BASE64_CHARS[i - 1] = alphabet:sub(i, i)
+    end
+end
+
+-- Codifica una cadena binaria a base64 (sin saltos de línea).
+-- Procesa 3 bytes por iteración usando aritmética para mayor rendimiento.
+-- Parámetros:
+--   data: cadena binaria
+-- Retorna: cadena base64
+local function encodeBase64(data)
+    local out = {}
+    local len = #data
+    local i = 1
+
+    while i <= len do
+        local b1 = data:byte(i)
+        local b2 = data:byte(i + 1)
+        local b3 = data:byte(i + 2)
+
+        local n = b1 * 65536 + (b2 or 0) * 256 + (b3 or 0)
+
+        local c1 = math.floor(n / 262144) % 64
+        local c2 = math.floor(n / 4096) % 64
+        local c3 = math.floor(n / 64) % 64
+        local c4 = n % 64
+
+        out[#out + 1] = BASE64_CHARS[c1]
+            .. BASE64_CHARS[c2]
+            .. (b2 and BASE64_CHARS[c3] or '=')
+            .. (b3 and BASE64_CHARS[c4] or '=')
+
+        i = i + 3
+    end
+
+    return table.concat(out)
+end
+
 -- Obtiene el nombre del archivo de una ruta
 -- Parámetros:
 --   filePath: ruta completa del archivo
@@ -384,6 +426,60 @@ local function processWithConcurrencyLimit(tasks, limit, progressCallback, total
     log:info(string.format("Procesamiento concurrente completado: %d/%d tareas", completed, totalTasks))
     
     return results
+end
+
+-- Comprueba una muestra de fotos contra Google Safe Search antes de exportar.
+-- Replica el pre-chequeo de moderación del frontend web.
+-- Parámetros:
+--   imagePaths: array de rutas a archivos de imagen ya exportados a tamaño reducido
+-- Retorna: tabla de respuesta del backend, p.ej. { passed = bool, violations = {...} }.
+--   Lanza error si el endpoint no está disponible (para permitir fail-open en el caller).
+function ApiService.checkSafeSearch(imagePaths)
+    if not imagePaths or #imagePaths == 0 then
+        return { passed = true, skipped = true }
+    end
+
+    local token = getAuthToken()
+    local url = Config.API_BASE_URL .. "/api/moderation/safe-search"
+
+    -- Leer y codificar cada imagen en base64
+    local base64Images = {}
+    for _, path in ipairs(imagePaths) do
+        local ok, fileData = pcall(readFileAsBinary, path)
+        if ok and fileData then
+            table.insert(base64Images, encodeBase64(fileData))
+        else
+            log:warn("Safe search: no se pudo leer la imagen de muestra: " .. tostring(path))
+        end
+    end
+
+    if #base64Images == 0 then
+        return { passed = true, skipped = true }
+    end
+
+    log:info("Safe search: enviando " .. tostring(#base64Images) .. " imágenes al endpoint de moderación")
+
+    local payload = { images = base64Images }
+    local headers = {
+        { field = "Authorization", value = "Bearer " .. token },
+        { field = "Content-Type", value = "application/json" }
+    }
+    local body = JSON.encode(payload)
+
+    local response, responseHeaders = LrHttp.post(url, body, headers)
+
+    if not response then
+        error("No response from safe search endpoint")
+    end
+
+    if responseHeaders and responseHeaders.status then
+        local statusCode = tonumber(responseHeaders.status)
+        if statusCode and (statusCode < 200 or statusCode >= 300) then
+            error(string.format("Safe search returned error %d: %s", statusCode, tostring(response)))
+        end
+    end
+
+    return JSON.decode(response)
 end
 
 -- FUNCIÓN PRINCIPAL: Sube fotos a la API de Photoreka

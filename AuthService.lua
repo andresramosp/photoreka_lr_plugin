@@ -121,9 +121,13 @@ function AuthService.login(email, password)
     log:info("Intentando login para: " .. email)
     
     local headers = {
-        { field = "Content-Type", value = "application/json" }
+        { field = "Content-Type", value = "application/json" },
+        -- Identifies this request as coming from the Lightroom plugin so the
+        -- backend issues a non-expiring token (the plugin can't silently
+        -- re-authenticate when a token expires).
+        { field = "X-Photoreka-Client", value = "lightroom-plugin" }
     }
-    
+
     local body = JSON.encode(payload)
     local response, responseHeaders = LrHttp.post(url, body, headers)
     

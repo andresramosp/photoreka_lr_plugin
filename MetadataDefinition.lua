@@ -35,7 +35,20 @@ return {
             searchable = true,
             browsable = true,
         },
+        {
+            -- Class given by Quick Screening (ScreenPhotos.lua); empty = never screened.
+            id = 'photorekascreening',
+            title = 'Photoreka Screening',
+            dataType = 'enum',
+            values = {
+                { value = 'failed', title = 'Failed' },
+                { value = 'passed', title = 'Passed' },
+                { value = 'standout', title = 'Standout' },
+            },
+            searchable = true,
+            browsable = true,
+        },
     },
-    
-    schemaVersion = 2,
+
+    schemaVersion = 3,
 }
