@@ -1,5 +1,6 @@
 -- ExifService.lua - Servicio de extracción de metadatos EXIF
 local LrLogger = import 'LrLogger'
+local LrTasks = import 'LrTasks'
 
 local ExifService = {}
 
@@ -40,6 +41,7 @@ local fieldMapping = {
     aperture = {"aperture", "fNumber"},
     shutterSpeed = {"shutterSpeed", "exposureTime"},
     focalLength = {"focalLength"},
+    focalLength35mm = {"focalLength35mm"},
     cameraMake = {"cameraMake", "make"},
     cameraModel = {"cameraModel", "model"},
     lens = {"lens", "lensInfo"},
@@ -84,7 +86,7 @@ end
 -- Función para extraer un valor usando múltiples claves posibles (FORMATTED)
 local function extractFormattedValue(photo, possibleKeys, logPrefix)
     for _, key in ipairs(possibleKeys) do
-        local success, value = pcall(function()
+        local success, value = LrTasks.pcall(function()
             return photo:getFormattedMetadata(key)
         end)
         
@@ -181,6 +183,16 @@ function ExifService.extractExifData(photo)
     local focalLength = extractRawValue(rawMetadata, fieldMapping.focalLength, "Distancia focal")
     if focalLength then
         exifData.focalLength = focalLength
+    end
+
+    -- Equivalente en 35 mm: muchas cámaras (casi todas las Canon) no lo graban.
+    -- Si el raw no lo trae se prueba el formatted, que llega como texto ("24 mm").
+    local focalLength35mm = extractRawValue(rawMetadata, fieldMapping.focalLength35mm, "Focal equivalente 35mm (raw)")
+    if not focalLength35mm then
+        focalLength35mm = extractFormattedValue(photo, fieldMapping.focalLength35mm, "Focal equivalente 35mm (formatted)")
+    end
+    if focalLength35mm then
+        exifData.focalLength35mm = focalLength35mm
     end
     
     local aperture = extractRawValue(rawMetadata, fieldMapping.aperture, "Apertura")

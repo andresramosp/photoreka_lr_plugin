@@ -44,6 +44,48 @@ local function readFileAsBinary(filePath)
     return fileData
 end
 
+-- Tabla de caracteres base64 indexada por valor (0–63) para codificación rápida.
+local BASE64_CHARS = {}
+do
+    local alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+    for i = 1, 64 do
+        BASE64_CHARS[i - 1] = alphabet:sub(i, i)
+    end
+end
+
+-- Codifica una cadena binaria a base64 (sin saltos de línea).
+-- Procesa 3 bytes por iteración usando aritmética para mayor rendimiento.
+-- Parámetros:
+--   data: cadena binaria
+-- Retorna: cadena base64
+local function encodeBase64(data)
+    local out = {}
+    local len = #data
+    local i = 1
+
+    while i <= len do
+        local b1 = data:byte(i)
+        local b2 = data:byte(i + 1)
+        local b3 = data:byte(i + 2)
+
+        local n = b1 * 65536 + (b2 or 0) * 256 + (b3 or 0)
+
+        local c1 = math.floor(n / 262144) % 64
+        local c2 = math.floor(n / 4096) % 64
+        local c3 = math.floor(n / 64) % 64
+        local c4 = n % 64
+
+        out[#out + 1] = BASE64_CHARS[c1]
+            .. BASE64_CHARS[c2]
+            .. (b2 and BASE64_CHARS[c3] or '=')
+            .. (b3 and BASE64_CHARS[c4] or '=')
+
+        i = i + 3
+    end
+
+    return table.concat(out)
+end
+
 -- Obtiene el nombre del archivo de una ruta
 -- Parámetros:
 --   filePath: ruta completa del archivo
@@ -152,6 +194,11 @@ local function requestUploadUrls(originalName, exifData, sourceData)
         if statusCode and (statusCode < 200 or statusCode >= 300) then
             log:error("Server error " .. tostring(statusCode) .. ": " .. tostring(response))
             
+            -- Token rechazado: invalidar caché para forzar re-validación en el próximo intento
+            if statusCode == 401 then
+                AuthService.invalidateToken()
+            end
+
             -- Detectar error de email no confirmado
             if statusCode == 403 and response then
                 local success, errorData = pcall(function() return JSON.decode(response) end)
@@ -175,6 +222,39 @@ local function requestUploadUrls(originalName, exifData, sourceData)
     log:info("JSON decodificado OK")
     
     return responseData
+end
+
+-- Confirma al backend que ambos objetos (main + thumbnail) llegaron a R2.
+-- Sin esta confirmación, el barrido de huérfanas del servidor eliminará la foto.
+-- Parámetros:
+--   photoId: ID de la foto devuelto por requestUploadUrls
+local function confirmUpload(photoId)
+    local token = getAuthToken()
+    local url = Config.API_BASE_URL .. "/api/catalog/confirmUpload"
+
+    local payload = { photoIds = { photoId } }
+    local headers = {
+        { field = "Authorization", value = "Bearer " .. token },
+        { field = "Content-Type", value = "application/json" }
+    }
+    local body = JSON.encode(payload)
+
+    local response, responseHeaders = LrHttp.post(url, body, headers)
+
+    if not response then
+        log:error("ERROR: No response from confirmUpload")
+        error("Failed to confirm upload for photo " .. tostring(photoId))
+    end
+
+    if responseHeaders and responseHeaders.status then
+        local statusCode = tonumber(responseHeaders.status)
+        if statusCode and (statusCode < 200 or statusCode >= 300) then
+            log:error("confirmUpload error " .. tostring(statusCode) .. ": " .. tostring(response))
+            error(string.format("confirmUpload returned error %d", statusCode))
+        end
+    end
+
+    log:info("Confirmación de subida OK para foto " .. tostring(photoId))
 end
 
 -- Procesa y sube una foto individual (main + thumbnail)
@@ -228,6 +308,10 @@ local function processAndUploadPhoto(mainImagePath, thumbnailPath, exifData, sou
     
     log:info("Thumbnail subido OK")
     log:info("===== FOTO COMPLETADA =====")
+    
+    -- 4. Confirmar al backend que ambos objetos llegaron a R2
+    log:info("PASO 4: Confirmando subida...")
+    confirmUpload(uploadData.photo.id)
     
     return uploadData.photo
 end
@@ -344,6 +428,60 @@ local function processWithConcurrencyLimit(tasks, limit, progressCallback, total
     return results
 end
 
+-- Comprueba una muestra de fotos contra Google Safe Search antes de exportar.
+-- Replica el pre-chequeo de moderación del frontend web.
+-- Parámetros:
+--   imagePaths: array de rutas a archivos de imagen ya exportados a tamaño reducido
+-- Retorna: tabla de respuesta del backend, p.ej. { passed = bool, violations = {...} }.
+--   Lanza error si el endpoint no está disponible (para permitir fail-open en el caller).
+function ApiService.checkSafeSearch(imagePaths)
+    if not imagePaths or #imagePaths == 0 then
+        return { passed = true, skipped = true }
+    end
+
+    local token = getAuthToken()
+    local url = Config.API_BASE_URL .. "/api/moderation/safe-search"
+
+    -- Leer y codificar cada imagen en base64
+    local base64Images = {}
+    for _, path in ipairs(imagePaths) do
+        local ok, fileData = pcall(readFileAsBinary, path)
+        if ok and fileData then
+            table.insert(base64Images, encodeBase64(fileData))
+        else
+            log:warn("Safe search: no se pudo leer la imagen de muestra: " .. tostring(path))
+        end
+    end
+
+    if #base64Images == 0 then
+        return { passed = true, skipped = true }
+    end
+
+    log:info("Safe search: enviando " .. tostring(#base64Images) .. " imágenes al endpoint de moderación")
+
+    local payload = { images = base64Images }
+    local headers = {
+        { field = "Authorization", value = "Bearer " .. token },
+        { field = "Content-Type", value = "application/json" }
+    }
+    local body = JSON.encode(payload)
+
+    local response, responseHeaders = LrHttp.post(url, body, headers)
+
+    if not response then
+        error("No response from safe search endpoint")
+    end
+
+    if responseHeaders and responseHeaders.status then
+        local statusCode = tonumber(responseHeaders.status)
+        if statusCode and (statusCode < 200 or statusCode >= 300) then
+            error(string.format("Safe search returned error %d: %s", statusCode, tostring(response)))
+        end
+    end
+
+    return JSON.decode(response)
+end
+
 -- FUNCIÓN PRINCIPAL: Sube fotos a la API de Photoreka
 -- Parámetros:
 --   photoData: tabla con {fullPhotos = {...}, thumbPhotos = {...}, exifDataList = {...}, sourceDataList = {...}}
@@ -356,26 +494,22 @@ function ApiService.uploadPhotos(photoData, progressCallback, onlyToLightbox)
     local thumbPhotos = photoData.thumbPhotos or {}
     local exifDataList = photoData.exifDataList or {}
     local sourceDataList = photoData.sourceDataList or {}
-    local totalPhotos = #fullPhotos
+    -- totalCount es el número original de fotos antes de filtrar skips (videos, etc.)
+    local totalPhotos = photoData.totalCount or #fullPhotos
     
     log:info("========================================")
     log:info("INICIANDO SUBIDA DE FOTOS CON CONCURRENCIA")
     log:info("Total fotos: " .. tostring(totalPhotos))
-    log:info("Full photos: " .. tostring(#fullPhotos))
-    log:info("Thumb photos: " .. tostring(#thumbPhotos))
+    log:info("Full photos (con posibles skips): " .. tostring(totalPhotos))
+    log:info("Thumb photos (con posibles skips): " .. tostring(totalPhotos))
     log:info("EXIF data: " .. tostring(#exifDataList))
     log:info("Only to Lightbox: " .. tostring(onlyToLightbox))
     log:info("Concurrent uploads: " .. tostring(Config.CONCURRENT_UPLOADS))
     log:info("========================================")
     
-    -- Validar que los arrays tengan la misma longitud
-    if #thumbPhotos ~= totalPhotos then
-        log:error("ERROR: Mismatch en cantidad de fotos!")
-        error("Mismatch: fullPhotos and thumbPhotos must have the same length")
-    end
-    
     local successfulUploads = {}
     local failedUploads = {}
+    local skippedUploads = 0
     
     -- Crear array de tareas (una por foto)
     local tasks = {}
@@ -386,6 +520,12 @@ function ApiService.uploadPhotos(photoData, progressCallback, onlyToLightbox)
             log:info(string.format("PROCESANDO FOTO %d de %d", i, totalPhotos))
             log:info("========================================")
             
+            -- Saltar fotos que no pudieron exportarse (ej: videos)
+            if not fullPhotos[i] or not thumbPhotos[i] then
+                log:warn(string.format("Photo %d skipped (no export path, possibly a video)", i))
+                return nil
+            end
+
             -- Obtener EXIF data (ya extraída en Main.lua)
             local exifData = exifDataList[i]
             if not exifData then
@@ -420,9 +560,12 @@ function ApiService.uploadPhotos(photoData, progressCallback, onlyToLightbox)
     
     -- Procesar resultados
     for i, result in ipairs(results) do
-        if result.success then
+        if result.success and result.result then
             log:info("✓ Foto " .. tostring(i) .. " subida exitosamente")
             table.insert(successfulUploads, result.result)
+        elseif result.success then
+            skippedUploads = skippedUploads + 1
+            log:info("- Foto " .. tostring(i) .. " omitida del upload")
         else
             log:error("✗ Foto " .. tostring(i) .. " FALLÓ: " .. tostring(result.result))
             table.insert(failedUploads, {
@@ -437,6 +580,7 @@ function ApiService.uploadPhotos(photoData, progressCallback, onlyToLightbox)
     log:info("========================================")
     log:info("RESUMEN DE SUBIDA")
     log:info("Exitosas: " .. tostring(#successfulUploads))
+    log:info("Omitidas: " .. tostring(skippedUploads))
     log:info("Fallidas: " .. tostring(#failedUploads))
     log:info("========================================")
     
@@ -527,6 +671,13 @@ function ApiService.search(query, searchMode)
         
         if statusCode and (statusCode < 200 or statusCode >= 300) then
             log:error("Search API error " .. tostring(statusCode) .. ": " .. tostring(response))
+            -- Detectar error de créditos insuficientes
+            if statusCode == 402 then
+                local ok, errData = pcall(function() return JSON.decode(response) end)
+                if ok and errData and errData.code == "INSUFFICIENT_CREDITS" then
+                    error("INSUFFICIENT_CREDITS")
+                end
+            end
             error(string.format("Search API returned error %d: %s", statusCode, response or "unknown error"))
         end
     end
@@ -536,6 +687,53 @@ function ApiService.search(query, searchMode)
     log:info("Resultados obtenidos: " .. tostring(#(searchResults.results or {})) .. " fotos")
     
     return searchResults
+end
+
+-- Obtiene los datos de uso del usuario autenticado desde /api/usage
+-- Retorna: tabla con {creditsUsed, photosLimit, creditsAvailable, analyzedPhotosUsed,
+--          analyzedPhotosLimit, photosUsage, analyzedPhotosRemaining} o genera error
+function ApiService.getUsage()
+    local token = getAuthToken()
+
+    local url = Config.API_BASE_URL .. "/api/usage"
+
+    log:info("Fetching usage data from: " .. url)
+
+    local headers = {
+        { field = "Authorization", value = "Bearer " .. token },
+    }
+
+    local response, responseHeaders = LrHttp.get(url, headers)
+
+    if not response then
+        log:error("ERROR: No response from usage API")
+        error("Failed to get usage data from server")
+    end
+
+    if responseHeaders and responseHeaders.status then
+        local statusCode = tonumber(responseHeaders.status)
+        if statusCode and (statusCode < 200 or statusCode >= 300) then
+            log:error("Usage API error " .. tostring(statusCode) .. ": " .. tostring(response))
+            if statusCode == 401 then
+                AuthService.invalidateToken()
+            end
+            error(string.format("Usage API returned error %d", statusCode))
+        end
+    end
+
+    local responseData = JSON.decode(response)
+    if responseData and responseData.data then
+        log:info(string.format(
+            "Usage fetched: creditsUsed=%d analyzedPhotosRemaining=%d photosLimit=%d photosUsage=%d",
+            responseData.data.creditsUsed or 0,
+            responseData.data.analyzedPhotosRemaining or 0,
+            responseData.data.photosLimit or 0,
+            responseData.data.photosUsage or 0
+        ))
+        return responseData.data
+    end
+
+    error("Invalid usage response format")
 end
 
 -- Crea un token handoff efímero para exportar fotos a Photoreka
