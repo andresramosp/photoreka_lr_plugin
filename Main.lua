@@ -70,8 +70,9 @@ local function showSafeSearchViolationDialog(f)
         f:spacer { height = 6 },
 
         f:static_text {
-            title = 'If you believe this is a mistake, please contact us at hello@photoreka.com\n'
-                .. 'and we will review your case as soon as possible.',
+            title = 'If you believe this is a mistake and need your account reactivated\n'
+                .. 'immediately, please contact us at hello@photoreka.com and we will\n'
+                .. 'review your case as soon as possible.',
             width = 460,
             font = '<system/small>',
         },

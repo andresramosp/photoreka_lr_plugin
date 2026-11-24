@@ -30,16 +30,14 @@ Config.USE_MOCK_EXIF = false
 -- Parámetros alineados con la compresión iterativa del frontend web.
 Config.EXPORT_ENABLE_QUALITY_REDUCTION = true
 Config.EXPORT_PARALLEL_VARIANTS = true
--- Lado largo anterior de la main; también fija el presupuesto de bytes del thumb.
-local LEGACY_FULL_MAX_SIDE = 1500
-Config.EXPORT_FULL_MAX_WIDTH = 1800
-Config.EXPORT_FULL_MAX_HEIGHT = 1800
+Config.EXPORT_FULL_MAX_WIDTH = 1500
+Config.EXPORT_FULL_MAX_HEIGHT = 1500
 Config.EXPORT_THUMB_MAX_WIDTH = 800
 Config.EXPORT_THUMB_MAX_HEIGHT = 800
 Config.EXPORT_FULL_MAX_SIZE_BYTES = 512000
 Config.EXPORT_THUMB_MAX_SIZE_BYTES = math.floor(
 	Config.EXPORT_FULL_MAX_SIZE_BYTES *
-	(Config.EXPORT_THUMB_MAX_WIDTH / LEGACY_FULL_MAX_SIDE)
+	(Config.EXPORT_THUMB_MAX_WIDTH / Config.EXPORT_FULL_MAX_WIDTH)
 )
 Config.EXPORT_JPEG_QUALITY_INITIAL = 0.9
 Config.EXPORT_JPEG_QUALITY_DECREMENT = 0.1

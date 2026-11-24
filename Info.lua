@@ -26,10 +26,6 @@ return {
             -- enabledWhen = "photosSelected"
         },
         {
-            title = "🎯 Quick Screening",
-            file = "ScreenPhotos.lua",
-        },
-        {
             title = "🔎 Search Photos",
             file = "Search.lua",
         },
@@ -58,10 +54,6 @@ return {
             title = "🚀 Analyze Photos",
             file = "Main.lua",
             -- enabledWhen = "photosSelected"
-        },
-        {
-            title = "🎯 Quick Screening",
-            file = "ScreenPhotos.lua",
         },
         {
             title = "🔎 Search Photos",
